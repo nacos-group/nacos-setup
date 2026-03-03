@@ -36,7 +36,7 @@ DOWNLOAD_BASE_URL="https://download.nacos.io"
 # nacos-setup version configuration
 NACOS_SETUP_VERSION="${NACOS_SETUP_VERSION:-0.0.1}"
 # nacos-cli configuration
-NACOS_CLI_VERSION="${NACOS_CLI_VERSION:-0.0.1}"
+NACOS_CLI_VERSION="${NACOS_CLI_VERSION:-0.0.2}"
 INSTALL_BASE_DIR="/usr/local"
 CURRENT_LINK="nacos-setup"
 BIN_DIR="/usr/local/bin"

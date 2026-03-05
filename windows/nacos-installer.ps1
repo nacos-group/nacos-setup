@@ -156,7 +156,7 @@ foreach ($arg in $args) {
 # Configuration
 # =============================
 $DownloadBaseUrl = "https://download.nacos.io"
-$NacosCliVersion = if ($env:NACOS_CLI_VERSION) { $env:NACOS_CLI_VERSION } else { "0.0.2" }
+$NacosCliVersion = if ($env:NACOS_CLI_VERSION) { $env:NACOS_CLI_VERSION } else { "0.0.6" }
 $NacosSetupVersion = if ($env:NACOS_SETUP_VERSION) { $env:NACOS_SETUP_VERSION } else { "0.0.1" }
 $CacheDir = Join-Path $realUserProfile ".nacos\cache"
 $InstallDir = Join-Path $realLocalAppData "Programs\nacos-cli"

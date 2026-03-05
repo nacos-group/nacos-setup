@@ -36,7 +36,7 @@ DOWNLOAD_BASE_URL="https://download.nacos.io"
 # nacos-setup version configuration
 NACOS_SETUP_VERSION="${NACOS_SETUP_VERSION:-0.0.1}"
 # nacos-cli configuration
-NACOS_CLI_VERSION="${NACOS_CLI_VERSION:-0.0.2}"
+NACOS_CLI_VERSION="${NACOS_CLI_VERSION:-0.0.6}"
 INSTALL_BASE_DIR="/usr/local"
 CURRENT_LINK="nacos-setup"
 BIN_DIR="/usr/local/bin"
@@ -718,43 +718,80 @@ main() {
     echo "  Nacos Setup Installer"
     echo "========================================"
     echo ""
-    
+
     # Parse arguments
     local install_cli=false
     local only_cli=false
-    case "${1:-}" in
-        version|--version|-v)
-            check_installed_version
-            exit $?
-            ;;
-        uninstall|--uninstall|-u)
-            uninstall_nacos_setup
-            exit 0
-            ;;
-        --cli)
-            install_cli=true
-            only_cli=true
-            ;;
-        --help|-h)
-            echo "Usage: curl -fsSL https://nacos.io/installer.sh | sudo bash"
-            echo ""
-            echo "Install nacos-setup and nacos-cli tools for managing Nacos instances."
-            echo ""
-            echo "Options:"
-            echo "  (none)              Install nacos-setup"
-            echo "  --cli               Install nacos-cli only"
-            echo "  version, -v         Show installed version"
-            echo "  uninstall, -u       Uninstall nacos-setup"
-            echo "  --help, -h          Show this help message"
-            echo ""
-            echo "After installation, use 'nacos-setup' command to manage Nacos:"
-            echo "  nacos-setup --help              Show nacos-setup help"
-            echo "  nacos-setup -v 3.1.1            Install Nacos standalone"
-            echo "  nacos-setup -c prod -n 3        Install Nacos cluster"
-            echo ""
-            exit 0
-            ;;
-    esac
+    local cli_version=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            version|--version)
+                check_installed_version
+                exit $?
+                ;;
+            uninstall|--uninstall|-u)
+                uninstall_nacos_setup
+                exit 0
+                ;;
+            --cli)
+                install_cli=true
+                only_cli=true
+                shift
+                ;;
+            -v|--version-cli)
+                if [ -z "$2" ] || [[ "$2" == -* ]]; then
+                    print_error "Option $1 requires a version number"
+                    echo ""
+                    print_info "Usage: ./nacos-installer.sh --cli -v <version>"
+                    exit 1
+                fi
+                if [[ "$install_cli" != true ]]; then
+                    print_error "Option $1 can only be used with --cli"
+                    echo ""
+                    print_info "Usage: ./nacos-installer.sh --cli -v <version>"
+                    exit 1
+                fi
+                cli_version="$2"
+                shift 2
+                ;;
+            --help|-h)
+                echo "Usage: curl -fsSL https://nacos.io/installer.sh | sudo bash"
+                echo ""
+                echo "Install nacos-setup and nacos-cli tools for managing Nacos instances."
+                echo ""
+                echo "Options:"
+                echo "  (none)              Install nacos-setup"
+                echo "  --cli               Install nacos-cli only"
+                echo "  -v, --version-cli   Specify nacos-cli version (with --cli)"
+                echo "  version             Show installed version"
+                echo "  uninstall, -u       Uninstall nacos-setup"
+                echo "  --help, -h          Show this help message"
+                echo ""
+                echo "Examples:"
+                echo "  ./nacos-installer.sh --cli              Install latest nacos-cli"
+                echo "  ./nacos-installer.sh --cli -v 0.0.3     Install nacos-cli v0.0.3"
+                echo ""
+                echo "After installation, use 'nacos-setup' command to manage Nacos:"
+                echo "  nacos-setup --help              Show nacos-setup help"
+                echo "  nacos-setup -v 3.1.1            Install Nacos standalone"
+                echo "  nacos-setup -c prod -n 3        Install Nacos cluster"
+                echo ""
+                exit 0
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                echo ""
+                print_info "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+
+    # Apply CLI version if specified
+    if [ -n "$cli_version" ]; then
+        NACOS_CLI_VERSION="$cli_version"
+    fi
     
     # Check requirements
     if ! check_requirements "${only_cli:+onlycli}"; then

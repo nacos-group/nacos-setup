@@ -46,7 +46,7 @@ function Invoke-StandaloneCleanup {
     if ($Global:CleanupDone) { return }
     $Global:CleanupDone = $true
     
-    # Skip cleanup in detach mode
+    # Skip cleanup in daemon mode
     if ($Global:DaemonMode) { exit $ExitCode }
     
     # Stop Nacos if running
@@ -207,7 +207,7 @@ function Invoke-StandaloneMode {
         
         Show-CompletionInfo $Global:InstallDir $consoleUrl $Global:ServerPort $Global:ConsolePort $Global:Version "nacos" $Global:NacosPassword
         
-        # Handle detach or monitoring mode
+        # Handle daemon or monitoring mode
         if ($Global:DaemonMode) {
             Write-Host ""
             Write-Info "Daemon mode: Script will exit now"

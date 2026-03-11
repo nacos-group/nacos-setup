@@ -144,9 +144,9 @@ nacos-setup -db-conf -c prod -n 3
 - `--no-start` - 安装后不自动启动
 - `--adv` - 高级模式（交互式配置）
 - `--daemon` - 后台模式（启动后退出）
-- `-db-conf [FILE]` - 使用外部数据源（默认：default.properties）
-- `db-conf edit [FILE]` - 编辑数据源配置
-- `db-conf show [FILE]` - 显示数据源配置
+- `-db-conf [NAME]` - 使用外部数据源（默认：default）
+- `db-conf edit [NAME]` - 编辑数据源配置
+- `db-conf show [NAME]` - 显示数据源配置
 - `-h, --help` - 显示帮助信息
 
 #### 单机模式选项

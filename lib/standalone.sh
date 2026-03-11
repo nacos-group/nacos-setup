@@ -51,8 +51,8 @@ cleanup_on_exit() {
     fi
     CLEANUP_DONE=true
     
-    # Skip cleanup in detach mode
-    if [ "$DETACH_MODE" = true ]; then
+    # Skip cleanup in daemon mode
+    if [ "$DAEMON_MODE" = true ]; then
         exit $exit_code
     fi
     
@@ -215,15 +215,15 @@ run_standalone_mode() {
         
         print_completion_info "$INSTALL_DIR" "$console_url" "$SERVER_PORT" "$CONSOLE_PORT" "$VERSION" "nacos" "$NACOS_PASSWORD"
         
-        # Handle detach or monitoring mode
-        if [ "$DETACH_MODE" = true ]; then
+        # Handle daemon or monitoring mode
+        if [ "$DAEMON_MODE" = true ]; then
             echo ""
-            print_info "Detach mode: Script will exit now"
+            print_info "Daemon mode: Script will exit now"
             print_info "Nacos is running with PID: $STARTED_NACOS_PID"
             print_info "To stop Nacos, run: kill $STARTED_NACOS_PID"
             echo ""
             
-            # Disable trap for detach mode
+            # Disable trap for daemon mode
             trap - EXIT INT TERM
             exit 0
         else

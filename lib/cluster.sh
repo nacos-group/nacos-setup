@@ -53,8 +53,8 @@ cleanup_on_exit() {
     
     trap - EXIT INT TERM
     
-    # Skip cleanup in detach mode
-    if [ "$DETACH_MODE" = true ]; then
+    # Skip cleanup in daemon mode
+    if [ "$DAEMON_MODE" = true ]; then
         exit $exit_code
     fi
     
@@ -350,9 +350,9 @@ create_cluster() {
         # Print cluster info
         print_cluster_info "$cluster_dir" "$VERSION" "$REPLICA_COUNT" "${node_main_ports[@]}" "${node_console_ports[@]}"
         
-        # Handle detach or monitoring
-        if [ "$DETACH_MODE" = true ]; then
-            print_info "Detach mode: Script will exit"
+        # Handle daemon or monitoring
+        if [ "$DAEMON_MODE" = true ]; then
+            print_info "Daemon mode: Script will exit"
             trap - EXIT INT TERM
             exit 0
         else
@@ -670,8 +670,8 @@ join_cluster() {
         if [ -n "$pid" ]; then
             print_info "Node joined successfully!"
             
-            if [ "$DETACH_MODE" = true ]; then
-                print_info "Detach mode: Script will exit"
+            if [ "$DAEMON_MODE" = true ]; then
+                print_info "Daemon mode: Script will exit"
                 trap - EXIT INT TERM
                 exit 0
             else

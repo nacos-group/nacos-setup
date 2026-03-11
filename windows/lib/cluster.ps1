@@ -47,7 +47,7 @@ function Invoke-ClusterCleanup {
     if ($Global:CleanupDone) { return }
     $Global:CleanupDone = $true
     
-    # Skip cleanup in detach mode
+    # Skip cleanup in daemon mode
     if ($Global:DaemonMode) { exit $ExitCode }
     
     # Stop all started processes

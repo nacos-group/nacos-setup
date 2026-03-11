@@ -124,7 +124,7 @@ MODE="$DEFAULT_MODE"  # standalone or cluster
 VERSION="$DEFAULT_VERSION"
 AUTO_START=true
 ADVANCED_MODE=false
-DETACH_MODE=false
+DAEMON_MODE=false
 
 # Standalone parameters
 INSTALL_DIR=""
@@ -171,9 +171,9 @@ COMMON OPTIONS:
     --no-start                     Do not start after installation
     --adv                          Advanced mode (interactive prompts)
     --daemon                     Daemon mode (run in background, exit after start)
-    -db-conf [FILE]                Use external datasource (default: default.properties)
-    db-conf edit [FILE]            Edit datasource configuration
-    db-conf show [FILE]            Show datasource configuration
+    -db-conf [NAME]               Use external datasource (default: default)
+    db-conf edit [NAME]           Edit datasource configuration
+    db-conf show [NAME]           Show datasource configuration
     -h, --help                     Show this help message
 
 STANDALONE MODE OPTIONS:
@@ -277,7 +277,7 @@ parse_arguments() {
                             ;;
                         *)
                             print_error "Unknown db-conf subcommand: $1"
-                            print_info "Usage: db-conf edit [FILE] | db-conf show [FILE]"
+                            print_info "Usage: db-conf edit [NAME] | db-conf show [NAME]"
                             exit 1
                             ;;
                     esac
@@ -291,7 +291,7 @@ parse_arguments() {
                 shift
                 ;;
             --daemon)
-                DETACH_MODE=true
+                DAEMON_MODE=true
                 shift
                 ;;
             --clean)

@@ -14,7 +14,8 @@ function Write-Success($msg) { Write-Host "[SUCCESS] $msg" -ForegroundColor Gree
 # =============================
 # Configuration
 # =============================
-$NacosSetupVersion = "0.0.2"
+# NOTE: This version is automatically updated by package.sh during build
+$NacosSetupVersion = "0.0.0-dev"
 
 # Get the actual user directory even when running as SYSTEM
 $realUserProfile = $env:USERPROFILE

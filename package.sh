@@ -11,15 +11,15 @@ PROJECT_ROOT="$SCRIPT_DIR"
 # ============================================================================
 # Version Configuration - MODIFY THIS TO CHANGE VERSION
 # ============================================================================
-DEFAULT_VERSION="0.0.2"
+VERSION="0.0.2"
 
 print() { echo "[package] $*"; }
 
 usage() {
     cat <<EOF
-Usage: $0 [version]
+Usage: $0
 
-If version is not provided, uses DEFAULT_VERSION defined in this script: $DEFAULT_VERSION
+Packages nacos-setup with the VERSION defined in this script: $VERSION
 
 Output: 
   ./dist/nacos-setup-VERSION.zip (Linux/macOS)
@@ -32,12 +32,8 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     exit 0
 fi
 
-# Use command line argument if provided, otherwise use default version
-VERSION="${1:-$DEFAULT_VERSION}"
-
 if [ -z "$VERSION" ]; then
-    echo "[package] Error: No version specified"
-    echo "Either modify DEFAULT_VERSION in this script or provide version as argument: ./package.sh 1.2.3"
+    echo "[package] Error: VERSION is not set in package.sh"
     exit 1
 fi
 
@@ -50,16 +46,16 @@ mkdir -p "$DIST_DIR"
 package_linux() {
     local name="nacos-setup-$VERSION"
     local tmp_dir="/tmp/${name}-package-$$"
-    
+
     print "Packaging Linux version: $VERSION"
     print "Staging to: $tmp_dir"
-    
+
     rm -rf "$tmp_dir"
     mkdir -p "$tmp_dir/$name"
-    
+
     # Linux files only (exclude installer and Windows files)
     local include=("nacos-setup.sh" "lib" "README.md" "LICENSE")
-    
+
     for f in "${include[@]}"; do
         if [ -e "$PROJECT_ROOT/$f" ]; then
             cp -a "$PROJECT_ROOT/$f" "$tmp_dir/$name/"
@@ -67,7 +63,13 @@ package_linux() {
             print "Warning: $f not found, skipping"
         fi
     done
-    
+
+    # Update version in packaged scripts
+    print "Updating version to $VERSION in packaged scripts..."
+    sed -i.bak "s/NACOS_SETUP_VERSION=\"[^\"]*\"/NACOS_SETUP_VERSION=\"$VERSION\"/" "$tmp_dir/$name/nacos-setup.sh" 2>/dev/null || \
+        sed -i '' "s/NACOS_SETUP_VERSION=\"[^\"]*\"/NACOS_SETUP_VERSION=\"$VERSION\"/" "$tmp_dir/$name/nacos-setup.sh" 2>/dev/null || true
+    rm -f "$tmp_dir/$name/nacos-setup.sh.bak"
+
     # Ensure scripts are executable
     if [ -d "$tmp_dir/$name/lib" ]; then
         chmod +x "$tmp_dir/$name/lib"/*.sh 2>/dev/null || true
@@ -127,7 +129,15 @@ package_windows() {
     # Copy shared documentation
     cp "$PROJECT_ROOT/README.md" "$tmp_dir/$name/" 2>/dev/null || true
     cp "$PROJECT_ROOT/LICENSE" "$tmp_dir/$name/" 2>/dev/null || true
-    
+
+    # Update version in packaged scripts
+    print "Updating version to $VERSION in packaged scripts..."
+    if [ -f "$tmp_dir/$name/nacos-setup.ps1" ]; then
+        sed -i.bak "s/\$NacosSetupVersion = \"[^\"]*\"/\$NacosSetupVersion = \"$VERSION\"/" "$tmp_dir/$name/nacos-setup.ps1" 2>/dev/null || \
+            sed -i '' "s/\$NacosSetupVersion = \"[^\"]*\"/\$NacosSetupVersion = \"$VERSION\"/" "$tmp_dir/$name/nacos-setup.ps1" 2>/dev/null || true
+        rm -f "$tmp_dir/$name/nacos-setup.ps1.bak"
+    fi
+
     pushd "$tmp_dir" >/dev/null
     local zipfile="$DIST_DIR/${name}.zip"
     print "Creating zip: $zipfile"

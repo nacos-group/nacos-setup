@@ -15,13 +15,14 @@
 
 # Nacos Setup - Unified Installation Script
 # Supports both standalone and cluster modes
-# Version: 0.0.2
+# Version: AUTO-UPDATED-BY-PACKAGE-SCRIPT
 
 # ============================================================================
 # Script Initialization
 # ============================================================================
 
-NACOS_SETUP_VERSION="0.0.2"
+# NOTE: This version is automatically updated by package.sh during build
+NACOS_SETUP_VERSION="0.0.0-dev"
 
 set -e  # Exit on error (will be disabled after initial checks)
 

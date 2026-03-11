@@ -47,7 +47,7 @@ function Invoke-StandaloneCleanup {
     $Global:CleanupDone = $true
     
     # Skip cleanup in detach mode
-    if ($Global:DetachMode) { exit $ExitCode }
+    if ($Global:DaemonMode) { exit $ExitCode }
     
     # Stop Nacos if running
     if ($Global:StartedNacosPid -and (Get-Process -Id $Global:StartedNacosPid -ErrorAction SilentlyContinue)) {
@@ -61,7 +61,7 @@ function Invoke-StandaloneCleanup {
         }
         
         Write-Host ""
-        Write-Info "Tip: Use --detach flag to run Nacos in background without auto-cleanup"
+        Write-Info "Tip: Use --daemon flag to run Nacos in background without auto-cleanup"
     }
     
     exit $ExitCode
@@ -208,9 +208,9 @@ function Invoke-StandaloneMode {
         Show-CompletionInfo $Global:InstallDir $consoleUrl $Global:ServerPort $Global:ConsolePort $Global:Version "nacos" $Global:NacosPassword
         
         # Handle detach or monitoring mode
-        if ($Global:DetachMode) {
+        if ($Global:DaemonMode) {
             Write-Host ""
-            Write-Info "Detach mode: Script will exit now"
+            Write-Info "Daemon mode: Script will exit now"
             Write-Info "Nacos is running with PID: $($Global:StartedNacosPid)"
             Write-Info "To stop Nacos, run: Stop-Process -Id $($Global:StartedNacosPid) -Force"
             Write-Host ""

@@ -68,7 +68,7 @@ cleanup_on_exit() {
         fi
         
         echo ""
-        print_info "Tip: Use --detach flag to run Nacos in background without auto-cleanup"
+        print_info "Tip: Use --daemon flag to run Nacos in background without auto-cleanup"
     fi
     
     exit $exit_code

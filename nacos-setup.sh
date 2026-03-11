@@ -170,7 +170,7 @@ COMMON OPTIONS:
     -p, --port PORT                Server port (default: 8848)
     --no-start                     Do not start after installation
     --adv                          Advanced mode (interactive prompts)
-    --detach                       Detach mode (exit after start)
+    --daemon                     Daemon mode (run in background, exit after start)
     -db-conf [FILE]                Use external datasource (default: default.properties)
     db-conf edit [FILE]            Edit datasource configuration
     db-conf show [FILE]            Show datasource configuration
@@ -290,7 +290,7 @@ parse_arguments() {
                 ADVANCED_MODE=true
                 shift
                 ;;
-            --detach)
+            --daemon)
                 DETACH_MODE=true
                 shift
                 ;;

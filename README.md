@@ -89,7 +89,7 @@ nacos-setup -v 2.5.2
 nacos-setup -p 18848 -d /opt/nacos
 
 # 后台运行
-nacos-setup --detach
+nacos-setup --daemon
 ```
 
 ### 场景二：本地部署 Nacos 集群
@@ -143,7 +143,7 @@ nacos-setup -db-conf -c prod -n 3
 - `-p, --port PORT` - 服务端口（默认：8848）
 - `--no-start` - 安装后不自动启动
 - `--adv` - 高级模式（交互式配置）
-- `--detach` - 后台模式（启动后退出）
+- `--daemon` - 后台模式（启动后退出）
 - `-db-conf [FILE]` - 使用外部数据源（默认：default.properties）
 - `db-conf edit [FILE]` - 编辑数据源配置
 - `db-conf show [FILE]` - 显示数据源配置

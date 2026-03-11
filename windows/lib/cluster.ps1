@@ -48,7 +48,7 @@ function Invoke-ClusterCleanup {
     $Global:CleanupDone = $true
     
     # Skip cleanup in detach mode
-    if ($Global:DetachMode) { exit $ExitCode }
+    if ($Global:DaemonMode) { exit $ExitCode }
     
     # Stop all started processes
     if ($Global:StartedPids.Count -gt 0) {
@@ -336,9 +336,9 @@ function New-Cluster {
         # Print cluster info
         Show-ClusterInfo $clusterDir $Global:Version $Global:ReplicaCount $nodeMainPorts $nodeConsolePorts
         
-        # Handle detach or monitoring
-        if ($Global:DetachMode) {
-            Write-Info "Detach mode: Script will exit"
+        # Handle daemon or monitoring
+        if ($Global:DaemonMode) {
+            Write-Info "Daemon mode: Script will exit"
             $Global:CleanupDone = $true
             exit 0
         } else {
@@ -619,8 +619,8 @@ function Join-ClusterMode {
         if ($nacosPid) {
             Write-Info "Node joined successfully!"
             
-            if ($Global:DetachMode) {
-                Write-Info "Detach mode: Script will exit"
+            if ($Global:DaemonMode) {
+                Write-Info "Daemon mode: Script will exit"
                 $Global:CleanupDone = $true
                 exit 0
             } else {

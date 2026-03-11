@@ -171,7 +171,7 @@ $Mode = $DefaultMode
 $Version = $DefaultVersion
 $AutoStart = $true
 $AdvancedMode = $false
-$DetachMode = $false
+$DaemonMode = $false
 $InstallDir = ""
 $Port = $DefaultPort
 $AllowKill = $false
@@ -194,7 +194,7 @@ $Global:Mode = $Mode
 $Global:Version = $Version
 $Global:AutoStart = $AutoStart
 $Global:AdvancedMode = $AdvancedMode
-$Global:DetachMode = $DetachMode
+$Global:DaemonMode = $DaemonMode
 $Global:InstallDir = $InstallDir
 $Global:Port = $Port
 $Global:BasePort = $BasePort
@@ -212,7 +212,7 @@ function Global:Invoke-NacosSetupCleanup {
     if ($Global:CleanupDone) { return }
     $Global:CleanupDone = $true
     
-    if (-not $Global:DetachMode -and $Global:StartedPids.Count -gt 0) {
+    if (-not $Global:DaemonMode -and $Global:StartedPids.Count -gt 0) {
         Write-Host ""
         Write-Info "Stopping Nacos processes..."
         foreach ($p in $Global:StartedPids) {
@@ -238,7 +238,7 @@ function Print-Usage {
     Write-Host "  -p, --port <PORT>        Main server port (Default: $DefaultPort)"
     Write-Host "  -d, --dir <PATH>         Custom installation directory"
     Write-Host "  --adv                    Enable advanced mode (custom tokens/passwords)"
-    Write-Host "  --detach                 Run in background (detach from terminal)"
+    Write-Host "  --daemon                 Run in background (daemon mode)"
     Write-Host "  --no-start               Install configuration only, do not start server"
     Write-Host "  --clean                  Remove existing installation before starting"
     Write-Host "  --kill                   Force kill existing process if port is occupied"
@@ -255,7 +255,7 @@ function Print-Usage {
     Write-Host ""
     Write-Host "Examples:"
     Write-Host "  nacos-setup -v 2.4.3"
-    Write-Host "  nacos-setup -p 8848 --detach"
+    Write-Host "  nacos-setup -p 8848 --daemon"
     Write-Host "  nacos-setup -c mycluster -n 3"
     Write-Host ""
 }
@@ -313,7 +313,7 @@ function Parse-Arguments($argv) {
                 }
             }
             "--adv" { $Global:AdvancedMode = $true; $i++ }
-            "--detach" { $Global:DetachMode = $true; $i++ }
+            "--daemon" { $Global:DaemonMode = $true; $i++ }
             "--clean" { $Global:CleanMode = $true; $i++ }
             "--join" { $Global:JoinMode = $true; $i++ }
             "--no-start" { $Global:AutoStart = $false; $i++ }
@@ -481,7 +481,7 @@ function Run-Standalone {
         }
         Open-Browser $consoleUrl | Out-Null
 
-        if (-not $Global:DetachMode -and $nacosPid) {
+        if (-not $Global:DaemonMode -and $nacosPid) {
             Write-Info "Press Ctrl+C to stop Nacos"
             try { Wait-Process -Id $nacosPid } catch {}
         }
@@ -633,7 +633,7 @@ function Run-Cluster {
         }
         Open-Browser $consoleUrl | Out-Null
 
-        if (-not $Global:DetachMode -and $pids.Count -gt 0) {
+        if (-not $Global:DaemonMode -and $pids.Count -gt 0) {
             Write-Info "Press Ctrl+C to stop cluster"
             foreach ($p in $pids) {
                 try { Wait-Process -Id $p } catch {}

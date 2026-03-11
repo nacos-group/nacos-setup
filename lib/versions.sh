@@ -207,10 +207,15 @@ get_version() {
 get_all_versions() {
     local timeout="${1:-1}"
 
-    # Fetch all versions (will use cache if already fetched)
-    NACOS_CLI_VERSION=$(get_version cli "$timeout")
-    NACOS_SETUP_VERSION=$(get_version setup "$timeout")
-    NACOS_SERVER_VERSION=$(get_version server "$timeout")
+    # Fetch versions file once if not already fetched
+    if [ "$_VERSIONS_FETCHED" != true ]; then
+        _fetch_versions "$timeout" >/dev/null 2>&1 || true
+    fi
+
+    # Use cached or fallback values
+    NACOS_CLI_VERSION="${_CACHED_CLI_VERSION:-$FALLBACK_NACOS_CLI_VERSION}"
+    NACOS_SETUP_VERSION="${_CACHED_SETUP_VERSION:-$FALLBACK_NACOS_SETUP_VERSION}"
+    NACOS_SERVER_VERSION="${_CACHED_SERVER_VERSION:-$FALLBACK_NACOS_SERVER_VERSION}"
 }
 
 # Print all versions (for debugging)

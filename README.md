@@ -142,8 +142,9 @@ nacos-setup -db-conf -c prod -n 3
 - `-v, --version VERSION` - Nacos 版本（默认：3.1.1，最低：2.4.0）
 - `-p, --port PORT` - 服务端口（默认：8848）
 - `--no-start` - 安装后不自动启动
-- `--adv` - 高级模式（交互式配置）
+- `--adv` - 高级模式（交互式配置 Token、密钥和密码）
 - `--daemon` - 后台模式（启动后退出）
+- `--kill` - 强制停止占用端口的现有进程
 - `-db-conf [NAME]` - 使用外部数据源（默认：default）
 - `db-conf edit [NAME]` - 编辑数据源配置
 - `db-conf show [NAME]` - 显示数据源配置

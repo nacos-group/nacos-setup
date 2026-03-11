@@ -233,6 +233,80 @@ fi
 echo ""
 
 # ============================================================================
+# 测试 8: --db-conf 功能测试
+echo "=== Test Group 8: --db-conf Feature ==="
+
+if [ -f "$LIB_DIR/config_manager.sh" ]; then
+    source "$LIB_DIR/config_manager.sh" 2>/dev/null
+    
+    # 测试 _resolve_config_path 函数
+    test_info "Testing _resolve_config_path function"
+    
+    # 测试配置名解析
+    resolved=$(_resolve_config_path "prod")
+    expected="$HOME/ai-infra/nacos/prod.properties"
+    if [ "$resolved" = "$expected" ]; then
+        test_pass "Config name 'prod' resolves to correct path"
+    else
+        test_fail "Config name resolution: expected $expected, got $resolved"
+    fi
+    
+    # 测试 "default" 关键字
+    resolved=$(_resolve_config_path "default")
+    if [ "$resolved" = "default" ]; then
+        test_pass "Config name 'default' preserved as-is"
+    else
+        test_fail "Config name 'default' should be preserved"
+    fi
+    
+    # 测试完整路径
+    resolved=$(_resolve_config_path "/custom/path/config.properties")
+    if [ "$resolved" = "/custom/path/config.properties" ]; then
+        test_pass "Full path preserved as-is"
+    else
+        test_fail "Full path should be preserved"
+    fi
+    
+    # 测试相对路径
+    resolved=$(_resolve_config_path "./local.properties")
+    if [ "$resolved" = "./local.properties" ]; then
+        test_pass "Relative path preserved as-is"
+    else
+        test_fail "Relative path should be preserved"
+    fi
+else
+    test_fail "config_manager.sh not found - skipping db-conf tests"
+fi
+
+# 测试 db-conf show 命令（不访问网络）
+if [ -f "$TEST_DIR/nacos-setup.sh" ]; then
+    test_info "Testing db-conf show command (local mode)"
+    
+    # 测试 db-conf show 不应获取版本（本地模式）
+    output=$(bash "$TEST_DIR/nacos-setup.sh" db-conf show 2>&1)
+    if echo "$output" | grep -q "Fetching versions"; then
+        test_fail "db-conf show should not fetch versions"
+    else
+        test_pass "db-conf show does not fetch versions (local mode)"
+    fi
+    
+    # 测试 db-conf edit 不应获取版本（本地模式）
+    # 使用 echo 模拟用户输入，测试命令不报错
+    output=$(echo -e "1\nlocalhost\n3306\nnacos\nroot\npassword" | bash "$TEST_DIR/nacos-setup.sh" db-conf edit /tmp/test_db_conf.properties 2>&1)
+    if echo "$output" | grep -q "Fetching versions"; then
+        test_fail "db-conf edit should not fetch versions"
+    else
+        test_pass "db-conf edit does not fetch versions (local mode)"
+    fi
+    
+    # 清理测试文件
+    rm -f /tmp/test_db_conf.properties
+else
+    test_fail "nacos-setup.sh not found - skipping db-conf command tests"
+fi
+echo ""
+
+# ============================================================================
 # 测试摘要
 echo "========================================"
 echo "   Test Summary"

@@ -147,8 +147,17 @@ function Update-PortConfig($configFile, $serverPort, $consolePort, $nacosVersion
     }
 }
 
-function Edit-DatasourceConfig($configFile = $null) {
-    $targetFile = if ($configFile -and $configFile -ne "default") { $configFile } else { $Global:DefaultDatasourceConfig }
+# Resolve config file path from config name
+function Resolve-ConfigPath($configName) {
+    if ($configName -eq "default" -or -not $configName) {
+        return $Global:DefaultDatasourceConfig
+    }
+    $userProfile = if ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) { $env:HOME } else { "." }
+    return Join-Path $userProfile "ai-infra\nacos\${configName}.properties"
+}
+
+function Edit-DatasourceConfig($configName = $null) {
+    $targetFile = Resolve-ConfigPath $configName
     Ensure-Directory (Split-Path $targetFile -Parent)
 
     Write-Host ""
@@ -217,8 +226,8 @@ db.password.0=$passPlain
     Write-Host "  User:      $user"
 }
 
-function Show-DatasourceConfig($configFile = $null) {
-    $targetFile = if ($configFile -and $configFile -ne "default") { $configFile } else { $Global:DefaultDatasourceConfig }
+function Show-DatasourceConfig($configName = $null) {
+    $targetFile = Resolve-ConfigPath $configName
 
     Write-Host ""
     Write-Info "========================================"
@@ -230,7 +239,7 @@ function Show-DatasourceConfig($configFile = $null) {
         Write-Warn "No datasource configuration found at: $targetFile"
         Write-Host ""
         Write-Info "To create a configuration, run:"
-        Write-Info "  nacos-setup db-conf edit [FILE]"
+        Write-Info "  nacos-setup db-conf edit [NAME]"
         return
     }
 

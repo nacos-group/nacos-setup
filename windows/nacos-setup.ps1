@@ -242,9 +242,9 @@ function Print-Usage {
     Write-Host "  --no-start               Install configuration only, do not start server"
     Write-Host "  --clean                  Remove existing installation before starting"
     Write-Host "  --kill                   Force kill existing process if port is occupied"
-    Write-Host "  -db-conf [FILE]          Use external datasource (default: default.properties)"
-    Write-Host "  db-conf edit [FILE]      Edit datasource configuration"
-    Write-Host "  db-conf show [FILE]      Show datasource configuration"
+    Write-Host "  -db-conf [NAME]          Use external datasource (default: default)"
+    Write-Host "  db-conf edit [NAME]      Edit datasource configuration"
+    Write-Host "  db-conf show [NAME]      Show datasource configuration"
     Write-Host "  -h, --help               Show this help message"
     Write-Host ""
     Write-Host "Cluster Options:"
@@ -303,7 +303,7 @@ function Parse-Arguments($argv) {
                         }
                         default {
                             Write-ErrorMsg "Unknown db-conf subcommand: $subCmd"
-                            Write-Info "Usage: db-conf edit [FILE] | db-conf show [FILE]"
+                            Write-Info "Usage: db-conf edit [NAME] | db-conf show [NAME]"
                             exit 1
                         }
                     }
@@ -661,7 +661,9 @@ try {
                 # Enable external datasource mode for installation
                 $env:USE_EXTERNAL_DATASOURCE = "true"
                 if ($Global:DbConfFile -and $Global:DbConfFile -ne "default") {
-                    $env:DEFAULT_DATASOURCE_CONFIG = $Global:DbConfFile
+                    # Resolve config name to full path
+                    $userProfile = if ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) { $env:HOME } else { "." }
+                    $env:DEFAULT_DATASOURCE_CONFIG = Join-Path $userProfile "ai-infra\nacos\${Global:DbConfFile}.properties"
                 }
                 # Continue to normal installation flow (will init version below)
             }

@@ -111,20 +111,22 @@ nacos-setup -c prod --leave 2
 nacos-setup -c prod --clean
 ```
 
-### 场景三：使用外置数据库（MySQL）
+### 场景三：使用外置数据库（MySQL/PostgreSQL）
 
-说明：以上命令默认使用内置 Derby 数据库。若需使用外置 MySQL，请先进行数据源配置。
+说明：以上命令默认使用内置 Derby 数据库。若需使用外置数据库，需要显式指定 `-db-conf` 参数。
 
 ```bash
-# 配置全局数据源（MySQL）
-nacos-setup --datasource-conf
+# 1. 创建数据源配置文件
+nacos-setup db-conf edit
 
-# 按提示填写 MySQL 连接信息后，再进行安装/部署
-# 示例：
+# 2. 使用外部数据源启动（必须显式指定 -db-conf）
 # 单机模式
-nacos-setup -v 3.1.1
+nacos-setup -db-conf -v 3.1.1
 # 集群模式
-nacos-setup -c prod -n 3
+nacos-setup -db-conf -c prod -n 3
+
+# 使用自定义配置文件
+nacos-setup -db-conf /path/to/custom.properties -v 3.1.1
 ```
 
 ## 📖 使用说明
@@ -138,7 +140,9 @@ nacos-setup -c prod -n 3
 - `--no-start` - 安装后不自动启动
 - `--adv` - 高级模式（交互式配置）
 - `--detach` - 后台模式（启动后退出）
-- `--datasource-conf` - 配置全局数据源
+- `-db-conf [FILE]` - 使用外部数据源（默认：default.properties）
+- `db-conf edit [FILE]` - 编辑数据源配置
+- `db-conf show [FILE]` - 显示数据源配置
 - `-h, --help` - 显示帮助信息
 
 #### 单机模式选项
@@ -192,10 +196,14 @@ nacos-setup -c prod -n 3
 
 ### 外部数据库配置
 
-1. 配置全局数据源：
+1. 创建/编辑数据源配置文件：
 
 ```bash
-nacos-setup --datasource-conf
+# 编辑默认配置文件（~/ai-infra/nacos/default.properties）
+nacos-setup db-conf edit
+
+# 编辑自定义配置文件
+nacos-setup db-conf edit /path/to/custom.properties
 ```
 
 2. 按照提示输入数据库信息：
@@ -205,9 +213,27 @@ nacos-setup --datasource-conf
    - 数据库名
    - 用户名和密码
 
-3. 配置将保存在 `~/ai-infra/nacos/default.properties`
+3. 查看已配置的数据源：
 
-4. 后续安装会自动使用该配置
+```bash
+# 查看默认配置
+nacos-setup db-conf show
+
+# 查看自定义配置
+nacos-setup db-conf show /path/to/custom.properties
+```
+
+4. 使用外部数据源启动（必须显式指定 `-db-conf`）：
+
+```bash
+# 使用默认配置文件
+nacos-setup -db-conf
+
+# 使用自定义配置文件
+nacos-setup -db-conf /path/to/custom.properties
+```
+
+**注意**：如果不指定 `-db-conf`，即使配置文件存在，也会使用内置 Derby 数据库。
 
 ### 集群管理
 
@@ -282,13 +308,13 @@ nacos-setup
 
 ```bash
 # 1. 配置外部 MySQL 数据库
-nacos-setup --datasource-conf
+nacos-setup db-conf edit
 
-# 2. 创建 3 节点集群
-nacos-setup -c production -n 3 -v 3.1.1
+# 2. 创建 3 节点集群（使用外部数据源）
+nacos-setup -db-conf -c production -n 3 -v 3.1.1
 
-# 3. 后续扩容：添加新节点
-nacos-setup -c production --join
+# 3. 后续扩容：添加新节点（使用外部数据源）
+nacos-setup -db-conf -c production --join
 
 # 4. 节点下线
 nacos-setup -c production --leave 3
@@ -371,10 +397,10 @@ A:
 
 ```bash
 # 1. 配置数据源
-nacos-setup --datasource-conf
+nacos-setup db-conf edit
 
-# 2. 重新安装（会自动使用外部数据库）
-nacos-setup -c prod --clean
+# 2. 使用 -db-conf 参数启动（必须显式指定）
+nacos-setup -db-conf -c prod --clean
 ```
 
 ### Q: 如何更新 Nacos 版本？

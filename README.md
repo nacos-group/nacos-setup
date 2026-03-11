@@ -116,17 +116,24 @@ nacos-setup -c prod --clean
 说明：以上命令默认使用内置 Derby 数据库。若需使用外置数据库，需要显式指定 `-db-conf` 参数。
 
 ```bash
-# 1. 创建数据源配置文件
+# 1. 创建数据源配置文件（默认保存在 ~/ai-infra/nacos/default.properties）
 nacos-setup db-conf edit
 
+# 创建命名配置文件（保存在 ~/ai-infra/nacos/prod.properties）
+nacos-setup db-conf edit prod
+
 # 2. 使用外部数据源启动（必须显式指定 -db-conf）
-# 单机模式
+# 使用默认配置
 nacos-setup -db-conf -v 3.1.1
+
+# 使用命名配置
+nacos-setup -db-conf prod -v 3.1.1
+
+# 使用完整路径指定配置
+nacos-setup -db-conf /path/to/custom.properties -v 3.1.1
+
 # 集群模式
 nacos-setup -db-conf -c prod -n 3
-
-# 使用自定义配置文件
-nacos-setup -db-conf /path/to/custom.properties -v 3.1.1
 ```
 
 ## 📖 使用说明
@@ -202,7 +209,10 @@ nacos-setup -db-conf /path/to/custom.properties -v 3.1.1
 # 编辑默认配置文件（~/ai-infra/nacos/default.properties）
 nacos-setup db-conf edit
 
-# 编辑自定义配置文件
+# 编辑命名配置文件（~/ai-infra/nacos/prod.properties）
+nacos-setup db-conf edit prod
+
+# 编辑指定路径的配置文件
 nacos-setup db-conf edit /path/to/custom.properties
 ```
 
@@ -219,7 +229,10 @@ nacos-setup db-conf edit /path/to/custom.properties
 # 查看默认配置
 nacos-setup db-conf show
 
-# 查看自定义配置
+# 查看命名配置
+nacos-setup db-conf show prod
+
+# 查看指定路径的配置
 nacos-setup db-conf show /path/to/custom.properties
 ```
 
@@ -229,7 +242,10 @@ nacos-setup db-conf show /path/to/custom.properties
 # 使用默认配置文件
 nacos-setup -db-conf
 
-# 使用自定义配置文件
+# 使用命名配置文件
+nacos-setup -db-conf prod
+
+# 使用指定路径的配置文件
 nacos-setup -db-conf /path/to/custom.properties
 ```
 

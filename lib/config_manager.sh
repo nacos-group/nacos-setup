@@ -253,27 +253,44 @@ EOF
     return 0
 }
 
+# Resolve config file path (handle name-only vs full path)
+# Parameters: config_name - Either a name (e.g., "prod") or full path
+# Returns: full path to config file
+_resolve_config_path() {
+    local config_name="$1"
+    # If not a full path and not "default", construct path in user config directory
+    if [[ "$config_name" != /* ]] && [[ "$config_name" != \.* ]] && [ "$config_name" != "default" ]; then
+        echo "$HOME/ai-infra/nacos/${config_name}.properties"
+    else
+        echo "$config_name"
+    fi
+}
+
 # Edit datasource configuration
-# Parameters: [config_file] - Optional path to config file (default: DEFAULT_DATASOURCE_CONFIG, "default" for default path)
+# Parameters: [config_file] - Config name (e.g., "prod") or full path (default: DEFAULT_DATASOURCE_CONFIG, "default" for default path)
 # Returns: 0 on success, 1 on failure
 db_conf_edit() {
     local config_file="${1:-$DEFAULT_DATASOURCE_CONFIG}"
     # Handle "default" keyword
     if [ "$config_file" = "default" ]; then
         config_file="$DEFAULT_DATASOURCE_CONFIG"
+    else
+        config_file=$(_resolve_config_path "$config_file")
     fi
     configure_datasource_interactive "$config_file"
     return $?
 }
 
 # Show datasource configuration
-# Parameters: [config_file] - Optional path to config file (default: DEFAULT_DATASOURCE_CONFIG, "default" for default path)
+# Parameters: [config_file] - Config name (e.g., "prod") or full path (default: DEFAULT_DATASOURCE_CONFIG, "default" for default path)
 # Returns: 0 on success, 1 on failure
 db_conf_show() {
     local config_file="${1:-$DEFAULT_DATASOURCE_CONFIG}"
     # Handle "default" keyword
     if [ "$config_file" = "default" ]; then
         config_file="$DEFAULT_DATASOURCE_CONFIG"
+    else
+        config_file=$(_resolve_config_path "$config_file")
     fi
 
     print_info ""

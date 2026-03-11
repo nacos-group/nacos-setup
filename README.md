@@ -129,9 +129,6 @@ nacos-setup -db-conf -v 3.1.1
 # 使用命名配置
 nacos-setup -db-conf prod -v 3.1.1
 
-# 使用完整路径指定配置
-nacos-setup -db-conf /path/to/custom.properties -v 3.1.1
-
 # 集群模式
 nacos-setup -db-conf -c prod -n 3
 ```
@@ -211,9 +208,6 @@ nacos-setup db-conf edit
 
 # 编辑命名配置文件（~/ai-infra/nacos/prod.properties）
 nacos-setup db-conf edit prod
-
-# 编辑指定路径的配置文件
-nacos-setup db-conf edit /path/to/custom.properties
 ```
 
 2. 按照提示输入数据库信息：
@@ -231,9 +225,6 @@ nacos-setup db-conf show
 
 # 查看命名配置
 nacos-setup db-conf show prod
-
-# 查看指定路径的配置
-nacos-setup db-conf show /path/to/custom.properties
 ```
 
 4. 使用外部数据源启动（必须显式指定 `-db-conf`）：
@@ -244,9 +235,6 @@ nacos-setup -db-conf
 
 # 使用命名配置文件
 nacos-setup -db-conf prod
-
-# 使用指定路径的配置文件
-nacos-setup -db-conf /path/to/custom.properties
 ```
 
 **注意**：如果不指定 `-db-conf`，即使配置文件存在，也会使用内置 Derby 数据库。

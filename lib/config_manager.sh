@@ -253,16 +253,15 @@ EOF
     return 0
 }
 
-# Resolve config file path (handle name-only vs full path)
-# Parameters: config_name - Either a name (e.g., "prod") or full path
+# Resolve config file path from config name
+# Parameters: config_name - Config name (e.g., "prod", "default")
 # Returns: full path to config file
 _resolve_config_path() {
     local config_name="$1"
-    # If not a full path and not "default", construct path in user config directory
-    if [[ "$config_name" != /* ]] && [[ "$config_name" != \.* ]] && [ "$config_name" != "default" ]; then
-        echo "$HOME/ai-infra/nacos/${config_name}.properties"
+    if [ "$config_name" = "default" ]; then
+        echo "$DEFAULT_DATASOURCE_CONFIG"
     else
-        echo "$config_name"
+        echo "$HOME/ai-infra/nacos/${config_name}.properties"
     fi
 }
 

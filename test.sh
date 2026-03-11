@@ -253,26 +253,11 @@ if [ -f "$LIB_DIR/config_manager.sh" ]; then
     
     # 测试 "default" 关键字
     resolved=$(_resolve_config_path "default")
-    if [ "$resolved" = "default" ]; then
-        test_pass "Config name 'default' preserved as-is"
+    expected="$DEFAULT_DATASOURCE_CONFIG"
+    if [ "$resolved" = "$expected" ]; then
+        test_pass "Config name 'default' resolves to default path"
     else
-        test_fail "Config name 'default' should be preserved"
-    fi
-    
-    # 测试完整路径
-    resolved=$(_resolve_config_path "/custom/path/config.properties")
-    if [ "$resolved" = "/custom/path/config.properties" ]; then
-        test_pass "Full path preserved as-is"
-    else
-        test_fail "Full path should be preserved"
-    fi
-    
-    # 测试相对路径
-    resolved=$(_resolve_config_path "./local.properties")
-    if [ "$resolved" = "./local.properties" ]; then
-        test_pass "Relative path preserved as-is"
-    else
-        test_fail "Relative path should be preserved"
+        test_fail "Config name 'default' resolution: expected $expected, got $resolved"
     fi
 else
     test_fail "config_manager.sh not found - skipping db-conf tests"

@@ -451,16 +451,9 @@ main() {
                 export USE_EXTERNAL_DATASOURCE
                 
                 # Set the default datasource config file for this run
-                if [ -n "$DB_CONF_FILE" ]; then
-                    if [ "$DB_CONF_FILE" != "default" ]; then
-                        # If not a full path, construct path in user config directory
-                        if [[ "$DB_CONF_FILE" != /* ]] && [[ "$DB_CONF_FILE" != \.* ]]; then
-                            DEFAULT_DATASOURCE_CONFIG="$HOME/ai-infra/nacos/${DB_CONF_FILE}.properties"
-                        else
-                            DEFAULT_DATASOURCE_CONFIG="$DB_CONF_FILE"
-                        fi
-                        export DEFAULT_DATASOURCE_CONFIG
-                    fi
+                if [ -n "$DB_CONF_FILE" ] && [ "$DB_CONF_FILE" != "default" ]; then
+                    DEFAULT_DATASOURCE_CONFIG="$HOME/ai-infra/nacos/${DB_CONF_FILE}.properties"
+                    export DEFAULT_DATASOURCE_CONFIG
                 fi
                 # Continue to normal installation flow (will init version below)
                 ;;

@@ -44,7 +44,7 @@ VERSIONS_URL="${DOWNLOAD_BASE_URL}/versions"
 # ============================================================================
 
 FALLBACK_NACOS_CLI_VERSION="0.0.8"
-FALLBACK_NACOS_SETUP_VERSION="0.0.1"
+FALLBACK_NACOS_SETUP_VERSION="0.0.2"
 FALLBACK_NACOS_SERVER_VERSION="3.2.0-BETA"
 
 # ============================================================================

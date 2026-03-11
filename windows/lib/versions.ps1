@@ -42,7 +42,7 @@ $script:VersionsUrl = "$script:DownloadBaseUrl/versions"
 # ============================================================================
 
 $script:FallbackNacosCliVersion = "0.0.8"
-$script:FallbackNacosSetupVersion = "0.0.1"
+$script:FallbackNacosSetupVersion = "0.0.2"
 $script:FallbackNacosServerVersion = "3.2.0-BETA"
 
 # ============================================================================

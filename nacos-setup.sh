@@ -15,13 +15,13 @@
 
 # Nacos Setup - Unified Installation Script
 # Supports both standalone and cluster modes
-# Version: 0.0.1
+# Version: 0.0.2
 
 # ============================================================================
 # Script Initialization
 # ============================================================================
 
-NACOS_SETUP_VERSION="0.0.1"
+NACOS_SETUP_VERSION="0.0.2"
 
 set -e  # Exit on error (will be disabled after initial checks)
 

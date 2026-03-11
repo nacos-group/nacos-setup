@@ -11,7 +11,7 @@ PROJECT_ROOT="$SCRIPT_DIR"
 # ============================================================================
 # Version Configuration - MODIFY THIS TO CHANGE VERSION
 # ============================================================================
-DEFAULT_VERSION="0.0.1"
+DEFAULT_VERSION="0.0.2"
 
 print() { echo "[package] $*"; }
 

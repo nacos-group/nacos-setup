@@ -111,9 +111,39 @@ function Print-SystemInfo {
 Print-SystemInfo
 
 # =============================
+# Load Version Management
+# =============================
+$LibDir = Join-Path $PSScriptRoot "lib"
+if (Test-Path (Join-Path $LibDir "versions.ps1")) {
+    . (Join-Path $LibDir "versions.ps1")
+}
+
+# Flag to track if user specified version via -v
+$UserSpecifiedVersion = $false
+
+function Initialize-Version {
+    # Only fetch from remote if user didn't specify -v
+    if ($script:UserSpecifiedVersion) {
+        return
+    }
+
+    # Get server version using unified version manager
+    $fetchedVersion = Get-Version -Component server -TimeoutSeconds 1
+    if ($fetchedVersion) {
+        $script:DefaultVersion = $fetchedVersion
+        $script:Version = $fetchedVersion
+    }
+}
+
+# =============================
 # Defaults
 # =============================
-$DefaultVersion = "3.1.1"
+# Get fallback version from versions.ps1 if available, otherwise use hardcoded
+if (Get-Command Get-Version -ErrorAction SilentlyContinue) {
+    $DefaultVersion = Get-Version -Component server -TimeoutSeconds 0
+} else {
+    $DefaultVersion = "3.2.0-BETA"
+}
 $DefaultInstallDir = Join-Path $realUserProfile "ai-infra\nacos"
 $DefaultMode = "standalone"
 $DefaultPort = 8848
@@ -229,8 +259,8 @@ function Parse-Arguments($argv) {
     for ($i=0; $i -lt $argsList.Count; $i++) {
         $a = $argsList[$i]
         switch ($a) {
-            "-v" { $Global:Version = $argsList[$i+1]; $i++ }
-            "--version" { $Global:Version = $argsList[$i+1]; $i++ }
+            "-v" { $Global:Version = $argsList[$i+1]; $script:UserSpecifiedVersion = $true; $i++ }
+            "--version" { $Global:Version = $argsList[$i+1]; $script:UserSpecifiedVersion = $true; $i++ }
             "-p" { $Global:Port = [int]$argsList[$i+1]; $Global:BasePort = $Global:Port; $i++ }
             "--port" { $Global:Port = [int]$argsList[$i+1]; $Global:BasePort = $Global:Port; $i++ }
             "-d" { $Global:InstallDir = $argsList[$i+1]; $i++ }
@@ -548,6 +578,11 @@ function Run-Cluster {
 
 try {
     Parse-Arguments $args
+
+    # Initialize version (fetch from remote only if user didn't specify -v)
+    Initialize-Version
+    Write-Host ""
+
     if ($DatasourceConfMode) {
         Write-Info "DatasourceConf mode detected"
         return

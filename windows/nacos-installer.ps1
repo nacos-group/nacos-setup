@@ -153,18 +153,35 @@ foreach ($arg in $args) {
 }
 
 # =============================
-# Configuration
+# Load Version Management
 # =============================
-$DownloadBaseUrl = "https://download.nacos.io"
-$NacosCliVersion = if ($env:NACOS_CLI_VERSION) { $env:NACOS_CLI_VERSION } else { "0.0.7" }
-$NacosSetupVersion = if ($env:NACOS_SETUP_VERSION) { $env:NACOS_SETUP_VERSION } else { "0.0.1" }
+$LibDir = Join-Path $PSScriptRoot "lib"
+if (Test-Path (Join-Path $LibDir "versions.ps1")) {
+    . (Join-Path $LibDir "versions.ps1")
+}
+
+# Runtime versions (will be populated from versions file)
+$NacosCliVersion = ""
+$NacosSetupVersion = ""
+$NacosServerVersion = ""
+
 $CacheDir = Join-Path $realUserProfile ".nacos\cache"
 $InstallDir = Join-Path $realLocalAppData "Programs\nacos-cli"
 $BinName = "nacos-cli.exe"
 $SetupRootDir = Join-Path $realLocalAppData "Programs\nacos-setup"
-$SetupInstallDir = Join-Path $SetupRootDir $NacosSetupVersion
 $SetupScriptName = "nacos-setup.ps1"
 $SetupCmdName = "nacos-setup.cmd"
+
+# Initialize versions using the unified version manager
+function Initialize-Versions {
+    # Load all versions with 1 second timeout
+    Get-AllVersions -TimeoutSeconds 1
+
+    # Set derived variables after version initialization
+    $script:SetupInstallDir = Join-Path $SetupRootDir $NacosSetupVersion
+
+    Write-Info "Versions: CLI=$NacosCliVersion, Setup=$NacosSetupVersion, Server=$NacosServerVersion"
+}
 
 # =============================
 # Main
@@ -173,6 +190,10 @@ Write-Host ""
 Write-Host "========================================"
 Write-Host "  Nacos Installer (Windows)"
 Write-Host "========================================"
+Write-Host ""
+
+# Initialize versions
+Initialize-Versions
 Write-Host ""
 
 if ($isAdmin) {

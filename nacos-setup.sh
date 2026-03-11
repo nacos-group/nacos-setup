@@ -71,7 +71,39 @@ source "$LIB_DIR/common.sh"
 # Default Configuration
 # ============================================================================
 
-DEFAULT_VERSION="3.1.1"
+# Load version management library
+if [ -f "$LIB_DIR/versions.sh" ]; then
+    source "$LIB_DIR/versions.sh"
+fi
+
+# Flag to track if user specified version via -v
+USER_SPECIFIED_VERSION=false
+
+# Initialize version on startup (only if user didn't specify -v)
+init_version() {
+    # If user specified version via -v, skip fetching
+    if [ "$USER_SPECIFIED_VERSION" = true ]; then
+        return 0
+    fi
+
+    # Try to fetch latest version from remote
+    local fetched_version=$(get_version server 1)
+    if [ -n "$fetched_version" ]; then
+        DEFAULT_VERSION="$fetched_version"
+        VERSION="$fetched_version"
+    fi
+}
+
+# ============================================================================
+# Default Configuration
+# ============================================================================
+
+# Get fallback version from versions.sh if available, otherwise use hardcoded
+if command -v get_version >/dev/null 2>&1; then
+    DEFAULT_VERSION=$(get_version server 0)
+else
+    DEFAULT_VERSION="3.2.0-BETA"
+fi
 DEFAULT_INSTALL_DIR="$HOME/ai-infra/nacos"
 DEFAULT_MODE="standalone"
 DEFAULT_PORT="8848"
@@ -233,6 +265,7 @@ parse_arguments() {
                     exit 1
                 fi
                 VERSION="$2"
+                USER_SPECIFIED_VERSION=true
                 shift 2
                 ;;
             -p|--port)
@@ -344,9 +377,13 @@ validate_arguments() {
 # ============================================================================
 
 main() {
-    # Parse command line arguments
+    # Parse command line arguments first
     parse_arguments "$@"
-    
+
+    # Initialize version (fetch from remote only if user didn't specify -v)
+    init_version
+    echo ""
+
     # Handle datasource configuration mode (special mode)
     if [ "$DATASOURCE_CONF_MODE" = true ]; then
         # This will be implemented in a separate module
@@ -355,7 +392,7 @@ main() {
         print_info "For now, please use: bash install.sh --datasource-conf"
         exit 0
     fi
-    
+
     # Validate arguments
     validate_arguments
     

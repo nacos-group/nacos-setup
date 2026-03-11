@@ -33,16 +33,37 @@ print_error() {
 # ============================================================================
 
 DOWNLOAD_BASE_URL="https://download.nacos.io"
-# nacos-setup version configuration
-NACOS_SETUP_VERSION="${NACOS_SETUP_VERSION:-0.0.1}"
-# nacos-cli configuration
-NACOS_CLI_VERSION="${NACOS_CLI_VERSION:-0.0.7}"
+
 INSTALL_BASE_DIR="/usr/local"
 CURRENT_LINK="nacos-setup"
 BIN_DIR="/usr/local/bin"
 SCRIPT_NAME="nacos-setup"
 TEMP_DIR="/tmp/nacos-setup-install-$$"
 CACHE_DIR="${HOME}/.nacos/cache"  # 缓存目录
+
+# ============================================================================
+# Load Version Management
+# ============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/lib/versions.sh" ]; then
+    source "$SCRIPT_DIR/lib/versions.sh"
+elif [ -f "$SCRIPT_DIR/../lib/versions.sh" ]; then
+    source "$SCRIPT_DIR/../lib/versions.sh"
+fi
+
+# Runtime versions (will be populated from versions file or fallback)
+NACOS_SETUP_VERSION=""
+NACOS_CLI_VERSION=""
+NACOS_SERVER_VERSION=""
+
+# Initialize versions using the unified version manager
+init_versions() {
+    # Load all versions with 1 second timeout
+    get_all_versions 1
+    
+    print_info "Versions: CLI=$NACOS_CLI_VERSION, Setup=$NACOS_SETUP_VERSION, Server=$NACOS_SERVER_VERSION" >&2
+}
 
 # ============================================================================
 # Check Requirements
@@ -719,6 +740,10 @@ main() {
     echo "========================================"
     echo ""
 
+    # Initialize versions (fetch from remote or use fallback)
+    init_versions
+    echo ""
+
     # Parse arguments
     local install_cli=false
     local only_cli=false
@@ -821,15 +846,8 @@ main() {
 
         # After installation, offer to install Nacos (default version)
         echo ""
-        # Try to detect default Nacos version from installed script
-        detected_default_version="3.1.1"
-        installed_script="$INSTALL_BASE_DIR/$CURRENT_LINK/bin/$SCRIPT_NAME"
-        if [ -f "$installed_script" ]; then
-            v=$(sed -n 's/^DEFAULT_VERSION="\(.*\)"/\1/p' "$installed_script" || true)
-            if [ -n "$v" ]; then
-                detected_default_version="$v"
-            fi
-        fi
+        # Use server version from versions file or fallback
+        detected_default_version="${NACOS_SERVER_VERSION:-$FALLBACK_NACOS_SERVER_VERSION}"
 
         read -p "Do you want to install Nacos $detected_default_version now? (Y/n): " -r REPLY
         echo ""

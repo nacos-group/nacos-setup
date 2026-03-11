@@ -20,14 +20,30 @@ $NacosSetupVersion = "0.0.0-dev"
 # Get the actual user directory even when running as SYSTEM
 $realUserProfile = $env:USERPROFILE
 
+# Cross-platform fallback for non-Windows environments (for testing)
+if (-not $realUserProfile) {
+    if ($env:HOME) {
+        $realUserProfile = $env:HOME
+    } elseif ($env:USERPROFILE) {
+        $realUserProfile = $env:USERPROFILE
+    } else {
+        $realUserProfile = "."
+    }
+}
+
 # If USERPROFILE points to SYSTEM, try to find real user
 if ($realUserProfile -match 'systemprofile|system32') {
+    # Get system drive (may not be C:)
+    $systemDrive = $env:SystemDrive
+    if (-not $systemDrive) { $systemDrive = "C:" }
+    $usersDir = Join-Path $systemDrive "Users"
+    
     try {
         $computerSystem = Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue
         if ($computerSystem -and $computerSystem.UserName) {
             $userName = $computerSystem.UserName
             if ($userName -match '\\(.+)$') { $userName = $matches[1] }
-            $userDir = "C:\Users\$userName"
+            $userDir = Join-Path $usersDir $userName
             if (Test-Path $userDir) { $realUserProfile = $userDir }
         }
     } catch {}
@@ -35,7 +51,7 @@ if ($realUserProfile -match 'systemprofile|system32') {
     if ($realUserProfile -match 'systemprofile|system32') {
         try {
             if ($env:USERNAME -and $env:USERNAME -ne 'SYSTEM') {
-                $userDir = "C:\Users\$env:USERNAME"
+                $userDir = Join-Path $usersDir $env:USERNAME
                 if (Test-Path $userDir) { $realUserProfile = $userDir }
             }
         } catch {}
@@ -43,7 +59,7 @@ if ($realUserProfile -match 'systemprofile|system32') {
 
     if ($realUserProfile -match 'systemprofile|system32') {
         try {
-            $profiles = @(Get-ChildItem "C:\Users" -Directory -ErrorAction SilentlyContinue | 
+            $profiles = @(Get-ChildItem $usersDir -Directory -ErrorAction SilentlyContinue | 
                 Where-Object { 
                     $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') -and
                     (Test-Path (Join-Path $_.FullName 'AppData'))
@@ -56,7 +72,7 @@ if ($realUserProfile -match 'systemprofile|system32') {
     }
 
     if ($realUserProfile -match 'systemprofile|system32') {
-        $realUserProfile = "C:\Users\Administrator"
+        $realUserProfile = Join-Path $usersDir "Administrator"
     }
 }
 
@@ -226,7 +242,9 @@ function Print-Usage {
     Write-Host "  --no-start               Install configuration only, do not start server"
     Write-Host "  --clean                  Remove existing installation before starting"
     Write-Host "  --kill                   Force kill existing process if port is occupied"
-    Write-Host "  --datasource-conf        Configure global external data source (MySQL/PG)"
+    Write-Host "  -db-conf [FILE]          Use external datasource (default: default.properties)"
+    Write-Host "  db-conf edit [FILE]      Edit datasource configuration"
+    Write-Host "  db-conf show [FILE]      Show datasource configuration"
     Write-Host "  -h, --help               Show this help message"
     Write-Host ""
     Write-Host "Cluster Options:"
@@ -244,16 +262,63 @@ function Print-Usage {
 
 function Parse-Arguments($argv) {
     $argsList = @()
-    foreach ($arg in $argv) {
+    $i = 0
+    while ($i -lt $argv.Count) {
+        $arg = $argv[$i]
         switch ($arg) {
-            "--adv" { $Global:AdvancedMode = $true }
-            "--detach" { $Global:DetachMode = $true }
-            "--clean" { $Global:CleanMode = $true }
-            "--join" { $Global:JoinMode = $true }
-            "--no-start" { $Global:AutoStart = $false }
-            "--kill" { $Global:AllowKill = $true }
-            "--datasource-conf" { $Global:DatasourceConfMode = $true }
-            default { $argsList += $arg }
+            "-db-conf" {
+                $Global:DbConfMode = "use"
+                if ($i + 1 -lt $argv.Count -and $argv[$i + 1] -notmatch "^-") {
+                    $Global:DbConfFile = $argv[$i + 1]
+                    $i++
+                } else {
+                    $Global:DbConfFile = "default"
+                }
+                $i++
+            }
+            "db-conf" {
+                $i++
+                if ($i -lt $argv.Count) {
+                    $subCmd = $argv[$i]
+                    switch ($subCmd) {
+                        "edit" {
+                            $Global:DbConfMode = "edit"
+                            $i++
+                            if ($i -lt $argv.Count -and $argv[$i] -notmatch "^-") {
+                                $Global:DbConfFile = $argv[$i]
+                                $i++
+                            } else {
+                                $Global:DbConfFile = "default"
+                            }
+                        }
+                        "show" {
+                            $Global:DbConfMode = "show"
+                            $i++
+                            if ($i -lt $argv.Count -and $argv[$i] -notmatch "^-") {
+                                $Global:DbConfFile = $argv[$i]
+                                $i++
+                            } else {
+                                $Global:DbConfFile = "default"
+                            }
+                        }
+                        default {
+                            Write-ErrorMsg "Unknown db-conf subcommand: $subCmd"
+                            Write-Info "Usage: db-conf edit [FILE] | db-conf show [FILE]"
+                            exit 1
+                        }
+                    }
+                } else {
+                    Write-ErrorMsg "db-conf requires a subcommand: edit or show"
+                    exit 1
+                }
+            }
+            "--adv" { $Global:AdvancedMode = $true; $i++ }
+            "--detach" { $Global:DetachMode = $true; $i++ }
+            "--clean" { $Global:CleanMode = $true; $i++ }
+            "--join" { $Global:JoinMode = $true; $i++ }
+            "--no-start" { $Global:AutoStart = $false; $i++ }
+            "--kill" { $Global:AllowKill = $true; $i++ }
+            default { $argsList += $arg; $i++ }
         }
     }
 
@@ -580,14 +645,38 @@ function Run-Cluster {
 try {
     Parse-Arguments $args
 
+    # Handle db-conf mode (local modes that don't need version fetching)
+    if ($Global:DbConfMode) {
+        . $PSScriptRoot\lib\config_manager.ps1
+        switch ($Global:DbConfMode) {
+            "edit" {
+                Edit-DatasourceConfig $Global:DbConfFile
+                exit 0
+            }
+            "show" {
+                Show-DatasourceConfig $Global:DbConfFile
+                exit 0
+            }
+            "use" {
+                # Enable external datasource mode for installation
+                $env:USE_EXTERNAL_DATASOURCE = "true"
+                if ($Global:DbConfFile -and $Global:DbConfFile -ne "default") {
+                    $env:DEFAULT_DATASOURCE_CONFIG = $Global:DbConfFile
+                }
+                # Continue to normal installation flow (will init version below)
+            }
+        }
+    }
+
     # Initialize version (fetch from remote only if user didn't specify -v)
     Initialize-Version
     Write-Host ""
 
-    if ($DatasourceConfMode) {
-        Write-Info "DatasourceConf mode detected"
-        return
+    # Print external datasource mode info if enabled
+    if ($env:USE_EXTERNAL_DATASOURCE -eq "true") {
+        Write-Info "External datasource mode enabled: $Global:DefaultDatasourceConfig"
     }
+
     Validate-Arguments
 
     switch ($Global:Mode) {

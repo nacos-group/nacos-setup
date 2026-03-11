@@ -141,15 +141,23 @@ function Invoke-StandaloneMode {
     # Configure security
     New-StandaloneSecurity $configFile $Global:AdvancedMode
     
-    # Load and apply datasource configuration
-    $datasourceFile = Get-GlobalDatasourceConfig
-    if ($datasourceFile) {
-        Write-Info "Applying global datasource configuration..."
-        Add-DatasourceConfig $configFile $datasourceFile
-        Write-Info "External database configured"
+    # Load and apply datasource configuration only if explicitly specified via -db-conf
+    if ($env:USE_EXTERNAL_DATASOURCE -eq "true") {
+        $datasourceFile = Load-DefaultDatasourceConfig
+        if ($datasourceFile) {
+            Write-Info "Applying external datasource configuration..."
+            Apply-DatasourceConfig $configFile $datasourceFile
+            Write-Info "External database configured"
+        } else {
+            Write-ErrorMsg "External datasource specified but configuration not found at: $Global:DefaultDatasourceConfig"
+            Write-Host ""
+            Write-Info "To create the configuration, run:"
+            Write-Info "  nacos-setup db-conf edit $Global:DefaultDatasourceConfig"
+            exit 1
+        }
     } else {
         Write-Info "Using embedded Derby database"
-        Write-Info "Tip: Run 'powershell nacos-setup.ps1 --datasource-conf' to configure external database"
+        Write-Info "Tip: Run 'nacos-setup -db-conf' to use external datasource"
     }
     
     Remove-Item "$configFile.bak" -ErrorAction SilentlyContinue

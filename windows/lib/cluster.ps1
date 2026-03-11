@@ -176,15 +176,24 @@ function New-Cluster {
     # Configure cluster security
     Configure-Cluster-Security $clusterDir $Global:AdvancedMode
     
-    # Check datasource
-    $datasourceFile = Get-GlobalDatasourceConfig
+    # Check datasource (only if explicitly specified via -db-conf)
     $useDerby = $true
     
-    if ($datasourceFile) {
-        Write-Info "Using external database"
-        $useDerby = $false
+    if ($env:USE_EXTERNAL_DATASOURCE -eq "true") {
+        $datasourceFile = Load-DefaultDatasourceConfig
+        if ($datasourceFile) {
+            Write-Info "Using external database"
+            $useDerby = $false
+        } else {
+            Write-ErrorMsg "External datasource specified but configuration not found at: $Global:DefaultDatasourceConfig"
+            Write-Host ""
+            Write-Info "To create the configuration, run:"
+            Write-Info "  nacos-setup db-conf edit $Global:DefaultDatasourceConfig"
+            exit 1
+        }
     } else {
         Write-Info "Using embedded Derby database"
+        Write-Info "Tip: Run 'nacos-setup -db-conf' to use external datasource"
     }
     Write-Host ""
     
@@ -257,9 +266,11 @@ function New-Cluster {
         Update-PortConfig $configFile $nodeMainPorts[$i] $nodeConsolePorts[$i] $Global:Version
         Apply-SecurityConfig $configFile $Global:TokenSecret $Global:IdentityKey $Global:IdentityValue
 
-        $datasourceFile = Get-GlobalDatasourceConfig
-        if ($datasourceFile) {
-            Apply-DatasourceConfig $configFile $datasourceFile
+        if ($env:USE_EXTERNAL_DATASOURCE -eq "true") {
+            $datasourceFile = Load-DefaultDatasourceConfig
+            if ($datasourceFile) {
+                Apply-DatasourceConfig $configFile $datasourceFile
+            }
         } elseif ($useDerby) {
             Configure-Derby-For-Cluster $configFile
         }
@@ -564,9 +575,7 @@ function Join-ClusterMode {
     Add-Content -Path (Join-Path $clusterDir "cluster.conf") -Value "${localIp}:${newMainPort}" -Encoding ASCII
     
     # Configure node
-    $datasourceFile = Get-GlobalDatasourceConfig
     $useDerby = $true
-    if ($datasourceFile) { $useDerby = $false }
     
     Copy-Item (Join-Path $clusterDir "cluster.conf") (Join-Path $newNodeDir "conf\cluster.conf")
     
@@ -580,9 +589,15 @@ function Join-ClusterMode {
     Update-PortConfig $configFile $newMainPort $newConsolePort $Global:Version
     Apply-SecurityConfig $configFile $Global:TokenSecret $Global:IdentityKey $Global:IdentityValue
     
-    if ($datasourceFile) {
-        Apply-DatasourceConfig $configFile $datasourceFile
-    } elseif ($useDerby) {
+    if ($env:USE_EXTERNAL_DATASOURCE -eq "true") {
+        $datasourceFile = Load-DefaultDatasourceConfig
+        if ($datasourceFile) {
+            Apply-DatasourceConfig $configFile $datasourceFile
+            $useDerby = $false
+        }
+    }
+    
+    if ($useDerby) {
         Configure-Derby-For-Cluster $configFile
     }
     

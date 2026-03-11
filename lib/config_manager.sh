@@ -24,22 +24,23 @@ source "$SCRIPT_DIR/common.sh"
 # Global Configuration Paths
 # ============================================================================
 
-GLOBAL_DATASOURCE_CONFIG="$HOME/ai-infra/nacos/default.properties"
+# Use environment variable if set, otherwise use default
+DEFAULT_DATASOURCE_CONFIG="${DEFAULT_DATASOURCE_CONFIG:-$HOME/ai-infra/nacos/default.properties}"
 
 # ============================================================================
 # Datasource Configuration
 # ============================================================================
 
-# Load global datasource configuration
-# Returns: path to global datasource file or empty string
-load_global_datasource_config() {
-    # Check if global datasource exists and contains database configuration
-    if [ -f "$GLOBAL_DATASOURCE_CONFIG" ] && [ -s "$GLOBAL_DATASOURCE_CONFIG" ]; then
-        # Check if global config contains actual database configuration
-        if grep -v '^[[:space:]]*#' "$GLOBAL_DATASOURCE_CONFIG" | \
+# Load default datasource configuration
+# Returns: path to default datasource file or empty string
+load_default_datasource_config() {
+    # Check if default datasource exists and contains database configuration
+    if [ -f "$DEFAULT_DATASOURCE_CONFIG" ] && [ -s "$DEFAULT_DATASOURCE_CONFIG" ]; then
+        # Check if default config contains actual database configuration
+        if grep -v '^[[:space:]]*#' "$DEFAULT_DATASOURCE_CONFIG" | \
            grep -v '^[[:space:]]*$' | \
            grep -qE '^(spring\.(datasource|sql\.init)\.platform|db\.num)'; then
-            echo "$GLOBAL_DATASOURCE_CONFIG"
+            echo "$DEFAULT_DATASOURCE_CONFIG"
             return 0
         fi
     fi
@@ -87,6 +88,214 @@ apply_datasource_config() {
     # No external database, use Derby (for cluster mode, must explicitly set)
     # For standalone mode, Derby is the default
     return 1
+}
+
+# Configure datasource interactively
+# Parameters: [config_file] - Optional path to config file (default: DEFAULT_DATASOURCE_CONFIG)
+# Returns: 0 on success, 1 on failure
+configure_datasource_interactive() {
+    local config_file="${1:-$DEFAULT_DATASOURCE_CONFIG}"
+
+    print_info ""
+    print_info "========================================"
+    print_info "External Datasource Configuration"
+    print_info "========================================"
+    echo ""
+    echo "This will create a global datasource configuration that will be"
+    echo "used by all future Nacos installations (standalone or cluster)."
+    echo ""
+    echo "Supported databases: MySQL, PostgreSQL"
+    echo ""
+
+    # Check if config already exists
+    if [ -f "$config_file" ] && [ -s "$config_file" ]; then
+        print_warn "Existing datasource configuration found at:"
+        print_warn "  $config_file"
+        echo ""
+        read -p "Overwrite existing configuration? (y/N): " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            print_info "Operation cancelled"
+            return 1
+        fi
+        echo ""
+    fi
+
+    # Database Type
+    echo "Step 1/6: Database Type"
+    echo "  1) MySQL"
+    echo "  2) PostgreSQL"
+    echo ""
+    while true; do
+        read -p "Select database type (1-2): " db_type_choice
+        case $db_type_choice in
+            1) db_platform="mysql"; break ;;
+            2) db_platform="postgresql"; break ;;
+            *) echo "Invalid choice. Please enter 1 or 2." ;;
+        esac
+    done
+    echo ""
+
+    # Database Host
+    echo "Step 2/6: Database Host"
+    read -p "Enter database host (default: localhost): " db_host
+    db_host=${db_host:-localhost}
+    echo ""
+
+    # Database Port
+    echo "Step 3/6: Database Port"
+    local default_port
+    if [ "$db_platform" = "mysql" ]; then
+        default_port=3306
+    else
+        default_port=5432
+    fi
+    read -p "Enter database port (default: $default_port): " db_port
+    db_port=${db_port:-$default_port}
+    echo ""
+
+    # Database Name
+    echo "Step 4/6: Database Name"
+    read -p "Enter database name (default: nacos): " db_name
+    db_name=${db_name:-nacos}
+    echo ""
+
+    # Database User
+    echo "Step 5/6: Database User"
+    read -p "Enter database username: " db_user
+    while [ -z "$db_user" ]; do
+        echo "Username cannot be empty"
+        read -p "Enter database username: " db_user
+    done
+    echo ""
+
+    # Database Password
+    echo "Step 6/6: Database Password"
+    read -s -p "Enter database password: " db_password
+    echo ""
+    while [ -z "$db_password" ]; do
+        echo "Password cannot be empty"
+        read -s -p "Enter database password: " db_password
+        echo ""
+    done
+    echo ""
+
+    # Construct database URL
+    local db_url
+    if [ "$db_platform" = "mysql" ]; then
+        db_url="jdbc:mysql://${db_host}:${db_port}/${db_name}?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true"
+    else
+        db_url="jdbc:postgresql://${db_host}:${db_port}/${db_name}?currentSchema=public"
+    fi
+
+    # Create directory if not exists
+    local datasource_dir=$(dirname "$config_file")
+    if ! mkdir -p "$datasource_dir" 2>/dev/null; then
+        print_error "Cannot create directory: $datasource_dir"
+        print_error "Please ensure you have write permissions or run with appropriate privileges"
+        return 1
+    fi
+
+    # Write configuration
+    if ! cat > "$config_file" 2>/dev/null << EOF
+# Nacos External Datasource Configuration
+# Auto-generated on $(date)
+
+# Database platform (mysql or postgresql)
+spring.sql.init.platform=$db_platform
+
+# Database connection pool size
+db.num=1
+
+# Database connection URL
+db.url.0=$db_url
+
+# Database credentials
+db.user.0=$db_user
+db.password.0=$db_password
+
+# Connection pool configuration
+db.pool.config.connectionTimeout=30000
+db.pool.config.validationTimeout=10000
+db.pool.config.maximumPoolSize=20
+db.pool.config.minimumIdle=2
+EOF
+    then
+        print_error "Cannot write to file: $config_file"
+        print_error "Please check file permissions"
+        return 1
+    fi
+
+    echo ""
+    print_info "Datasource configuration saved to:"
+    print_info "  $config_file"
+    echo ""
+    print_info "Configuration Summary:"
+    echo "  Platform:  $db_platform"
+    echo "  Host:      $db_host"
+    echo "  Port:      $db_port"
+    echo "  Database:  $db_name"
+    echo "  User:      $db_user"
+    echo ""
+    print_info "This configuration will be used by all future Nacos installations."
+    print_warn "Make sure the database exists and is accessible before installing Nacos."
+    echo ""
+
+    # Provide SQL initialization hint
+    if [ "$db_platform" = "mysql" ]; then
+        print_info "To initialize the database schema, run:"
+        echo "  mysql -h$db_host -P$db_port -u$db_user -p$db_password $db_name < \$NACOS_HOME/conf/mysql-schema.sql"
+    else
+        print_info "To initialize the database schema, run:"
+        echo "  psql -h$db_host -p$db_port -U$db_user -d$db_name -f \$NACOS_HOME/conf/postgresql-schema.sql"
+    fi
+    echo ""
+
+    return 0
+}
+
+# Edit datasource configuration
+# Parameters: [config_file] - Optional path to config file (default: DEFAULT_DATASOURCE_CONFIG, "default" for default path)
+# Returns: 0 on success, 1 on failure
+db_conf_edit() {
+    local config_file="${1:-$DEFAULT_DATASOURCE_CONFIG}"
+    # Handle "default" keyword
+    if [ "$config_file" = "default" ]; then
+        config_file="$DEFAULT_DATASOURCE_CONFIG"
+    fi
+    configure_datasource_interactive "$config_file"
+    return $?
+}
+
+# Show datasource configuration
+# Parameters: [config_file] - Optional path to config file (default: DEFAULT_DATASOURCE_CONFIG, "default" for default path)
+# Returns: 0 on success, 1 on failure
+db_conf_show() {
+    local config_file="${1:-$DEFAULT_DATASOURCE_CONFIG}"
+    # Handle "default" keyword
+    if [ "$config_file" = "default" ]; then
+        config_file="$DEFAULT_DATASOURCE_CONFIG"
+    fi
+
+    print_info ""
+    print_info "========================================"
+    print_info "Datasource Configuration"
+    print_info "========================================"
+    echo ""
+
+    if [ ! -f "$config_file" ] || [ ! -s "$config_file" ]; then
+        print_warn "No datasource configuration found at:"
+        print_warn "  $config_file"
+        echo ""
+        print_info "To create a configuration, run:"
+        print_info "  nacos-setup db-conf edit [FILE]"
+        return 1
+    fi
+
+    print_info "File: $config_file"
+    echo ""
+    cat "$config_file"
+    echo ""
+    return 0
 }
 
 # Configure Derby for cluster mode

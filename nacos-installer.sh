@@ -765,30 +765,20 @@ main() {
                 only_cli=true
                 shift
                 ;;
-            -v|--version-cli)
+            -v|--version)
                 if [ -z "$2" ] || [[ "$2" == -* ]]; then
                     print_error "Option $1 requires a version number"
                     echo ""
-                    print_info "Usage: ./nacos-installer.sh --cli -v <version>"
+                    print_info "Usage: ./nacos-installer.sh -v <version>"
+                    print_info "        ./nacos-installer.sh --cli -v <version>"
                     exit 1
                 fi
-                if [[ "$install_cli" != true ]]; then
-                    print_error "Option $1 can only be used with --cli"
-                    echo ""
-                    print_info "Usage: ./nacos-installer.sh --cli -v <version>"
-                    exit 1
+                # 根据模式决定版本类型
+                if [[ "$install_cli" == true ]]; then
+                    cli_version="$2"
+                else
+                    setup_version="$2"
                 fi
-                cli_version="$2"
-                shift 2
-                ;;
-            --setup-version)
-                if [ -z "$2" ] || [[ "$2" == -* ]]; then
-                    print_error "Option $1 requires a version number"
-                    echo ""
-                    print_info "Usage: ./nacos-installer.sh --setup-version <version>"
-                    exit 1
-                fi
-                setup_version="$2"
                 shift 2
                 ;;
             --help|-h)
@@ -798,16 +788,15 @@ main() {
                 echo ""
                 echo "Options:"
                 echo "  (none)              Install nacos-setup"
-                echo "  --setup-version     Specify nacos-setup version"
+                echo "  -v, --version       Specify version (nacos-setup or nacos-cli with --cli)"
                 echo "  --cli               Install nacos-cli only"
-                echo "  -v, --version-cli   Specify nacos-cli version (with --cli)"
                 echo "  version             Show installed version"
                 echo "  uninstall, -u       Uninstall nacos-setup"
                 echo "  --help, -h          Show this help message"
                 echo ""
                 echo "Examples:"
                 echo "  ./nacos-installer.sh                    Install latest nacos-setup"
-                echo "  ./nacos-installer.sh --setup-version 0.0.3   Install nacos-setup v0.0.3"
+                echo "  ./nacos-installer.sh -v 0.0.3           Install nacos-setup v0.0.3"
                 echo "  ./nacos-installer.sh --cli              Install latest nacos-cli"
                 echo "  ./nacos-installer.sh --cli -v 0.0.3     Install nacos-cli v0.0.3"
                 echo ""

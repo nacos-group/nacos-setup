@@ -143,12 +143,35 @@ $realLocalAppData = Join-Path $realUserProfile "AppData\Local"
 # Parse Arguments
 # =============================
 $InstallCli = $false
+$SetupVersion = $null
+$CliVersion = $null
 
-# Check for -cli flag
-foreach ($arg in $args) {
-    if ($arg -eq "-cli" -or $arg -eq "--cli") {
-        $InstallCli = $true
-        break
+# Parse arguments
+for ($i = 0; $i -lt $args.Count; $i++) {
+    $arg = $args[$i]
+    switch ($arg) {
+        "-cli" { $InstallCli = $true }
+        "--cli" { $InstallCli = $true }
+        "-v" {
+            if ($i + 1 -lt $args.Count -and $args[$i + 1] -notmatch "^-") {
+                if ($InstallCli) {
+                    $CliVersion = $args[$i + 1]
+                } else {
+                    $SetupVersion = $args[$i + 1]
+                }
+                $i++
+            }
+        }
+        "--version" {
+            if ($i + 1 -lt $args.Count -and $args[$i + 1] -notmatch "^-") {
+                if ($InstallCli) {
+                    $CliVersion = $args[$i + 1]
+                } else {
+                    $SetupVersion = $args[$i + 1]
+                }
+                $i++
+            }
+        }
     }
 }
 
@@ -176,6 +199,16 @@ $SetupCmdName = "nacos-setup.cmd"
 function Initialize-Versions {
     # Load all versions with 1 second timeout
     Get-AllVersions -TimeoutSeconds 1
+
+    # Apply user-specified versions if provided
+    if ($SetupVersion) {
+        $script:NacosSetupVersion = $SetupVersion
+        Write-Info "Using specified nacos-setup version: $SetupVersion"
+    }
+    if ($CliVersion) {
+        $script:NacosCliVersion = $CliVersion
+        Write-Info "Using specified nacos-cli version: $CliVersion"
+    }
 
     # Set derived variables after version initialization
     $script:SetupInstallDir = Join-Path $SetupRootDir $NacosSetupVersion

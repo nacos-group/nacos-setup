@@ -265,8 +265,8 @@ install_nacos_setup() {
     print_info "Installing nacos-setup..."
     echo ""
     
-    # Get version from environment variable or use default
-    local setup_version="${NACOS_SETUP_VERSION}"
+    # Get version from parameter, environment variable, or use default
+    local setup_version="${1:-${NACOS_SETUP_VERSION}}"
     
     print_info "Target version: $setup_version"
     
@@ -748,6 +748,7 @@ main() {
     local install_cli=false
     local only_cli=false
     local cli_version=""
+    local setup_version=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -780,6 +781,16 @@ main() {
                 cli_version="$2"
                 shift 2
                 ;;
+            --setup-version)
+                if [ -z "$2" ] || [[ "$2" == -* ]]; then
+                    print_error "Option $1 requires a version number"
+                    echo ""
+                    print_info "Usage: ./nacos-installer.sh --setup-version <version>"
+                    exit 1
+                fi
+                setup_version="$2"
+                shift 2
+                ;;
             --help|-h)
                 echo "Usage: curl -fsSL https://nacos.io/installer.sh | sudo bash"
                 echo ""
@@ -787,6 +798,7 @@ main() {
                 echo ""
                 echo "Options:"
                 echo "  (none)              Install nacos-setup"
+                echo "  --setup-version     Specify nacos-setup version"
                 echo "  --cli               Install nacos-cli only"
                 echo "  -v, --version-cli   Specify nacos-cli version (with --cli)"
                 echo "  version             Show installed version"
@@ -794,6 +806,8 @@ main() {
                 echo "  --help, -h          Show this help message"
                 echo ""
                 echo "Examples:"
+                echo "  ./nacos-installer.sh                    Install latest nacos-setup"
+                echo "  ./nacos-installer.sh --setup-version 0.0.3   Install nacos-setup v0.0.3"
                 echo "  ./nacos-installer.sh --cli              Install latest nacos-cli"
                 echo "  ./nacos-installer.sh --cli -v 0.0.3     Install nacos-cli v0.0.3"
                 echo ""
@@ -832,7 +846,7 @@ main() {
     fi
 
     # Install
-    install_nacos_setup
+    install_nacos_setup "$setup_version"
 
     # Verify
     if verify_installation; then

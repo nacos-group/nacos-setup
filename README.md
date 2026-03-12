@@ -15,7 +15,7 @@
 
 ## 📌 当前版本
 
-- nacos-setup：0.0.1
+- nacos-setup：0.0.3
 
 ## 📦 安装
 

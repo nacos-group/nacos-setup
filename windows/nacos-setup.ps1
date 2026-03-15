@@ -663,7 +663,7 @@ try {
                 if ($Global:DbConfFile -and $Global:DbConfFile -ne "default") {
                     # Resolve config name to full path
                     $userProfile = if ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) { $env:HOME } else { "." }
-                    $env:DEFAULT_DATASOURCE_CONFIG = Join-Path $userProfile "ai-infra\nacos\${Global:DbConfFile}.properties"
+                    $env:DEFAULT_DATASOURCE_CONFIG = Join-Path $userProfile "ai-infra\nacos\$($Global:DbConfFile).properties"
                 }
                 # Continue to normal installation flow (will init version below)
             }

@@ -32,8 +32,18 @@ function Ensure-Directory($path) {
 function Version-Ge($v1, $v2) {
     if ([string]::IsNullOrWhiteSpace($v1)) { $v1 = "0.0.0" }
     if ([string]::IsNullOrWhiteSpace($v2)) { $v2 = "0.0.0" }
-    $a = $v1.Split('.') | ForEach-Object { [int]($_) }
-    $b = $v2.Split('.') | ForEach-Object { [int]($_) }
+    
+    # Extract numeric parts (handle versions like "3.2.0-BETA")
+    function Get-NumericParts($ver) {
+        $clean = $ver -replace '[^0-9.].*$', ''  # Remove suffixes like -BETA, -ALPHA, etc.
+        $parts = $clean.Split('.') | ForEach-Object {
+            try { [int]$_ } catch { 0 }
+        }
+        return $parts
+    }
+    
+    $a = Get-NumericParts $v1
+    $b = Get-NumericParts $v2
     for ($i=0; $i -lt 3; $i++) {
         $x = if ($i -lt $a.Count) { $a[$i] } else { 0 }
         $y = if ($i -lt $b.Count) { $b[$i] } else { 0 }
@@ -74,8 +84,10 @@ function Update-ConfigProperty($configFile, $key, $value) {
     if ([string]::IsNullOrWhiteSpace($configFile)) { throw "Config file path cannot be empty" }
     if (-not (Test-Path $configFile)) { throw "Config file not found: $configFile" }
     $lines = Get-Content -Path $configFile -Raw -ErrorAction Stop -Encoding UTF8
-    $pattern = "(?m)^(#?" + [Regex]::Escape($key) + ")=.*$"
+    # Match both commented (#key=value) and uncommented (key=value) lines
+    $pattern = "(?m)^#?\s*" + [Regex]::Escape($key) + "\s*=.*$"
     if ($lines -match $pattern) {
+        # Replace with uncommented version
         $lines = [Regex]::Replace($lines, $pattern, "$key=$value")
     } else {
         if (-not $lines.EndsWith("`n")) { $lines += "`n" }

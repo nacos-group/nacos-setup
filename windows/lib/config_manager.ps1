@@ -16,6 +16,11 @@ function Load-DefaultDatasourceConfig {
     return $null
 }
 
+# Alias for compatibility
+function Load-GlobalDatasourceConfig {
+    return Load-DefaultDatasourceConfig
+}
+
 function Apply-DatasourceConfig($configFile, $datasourceFile) {
     if (-not (Test-Path $configFile)) { throw "Config file not found: $configFile" }
     if (-not $datasourceFile -or -not (Test-Path $datasourceFile)) { return $false }
@@ -183,47 +188,48 @@ function Edit-DatasourceConfig($configName = $null) {
     $dbType = $dbType.ToLower()
     if ($dbType -ne "mysql" -and $dbType -ne "postgresql") { throw "Unsupported database type" }
 
-    $host = Read-Host "Database host (default: localhost)"
-    if (-not $host) { $host = "localhost" }
+    $dbHost = Read-Host "Database host (default: localhost)"
+    if (-not $dbHost) { $dbHost = "localhost" }
 
     $defaultPort = if ($dbType -eq "mysql") { "3306" } else { "5432" }
-    $port = Read-Host "Database port (default: $defaultPort)"
-    if (-not $port) { $port = $defaultPort }
+    $dbPort = Read-Host "Database port (default: $defaultPort)"
+    if (-not $dbPort) { $dbPort = $defaultPort }
 
     $dbName = Read-Host "Database name (default: nacos)"
     if (-not $dbName) { $dbName = "nacos" }
 
-    $user = Read-Host "Database username"
-    if (-not $user) { throw "Database username is required" }
+    $dbUser = Read-Host "Database username"
+    if (-not $dbUser) { throw "Database username is required" }
 
     $pass = Read-Host "Database password" -AsSecureString
     $passPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($pass))
 
     if ($dbType -eq "mysql") {
-        $jdbc = "jdbc:mysql://$host`:$port/$dbName?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useUnicode=true&useSSL=false&serverTimezone=UTC"
+        $jdbc = "jdbc:mysql://$($dbHost):$($dbPort)/$($dbName)?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useUnicode=true&useSSL=false&serverTimezone=UTC"
     } else {
-        $jdbc = "jdbc:postgresql://$host`:$port/$dbName?stringtype=unspecified"
+        $jdbc = "jdbc:postgresql://$($dbHost):$($dbPort)/$($dbName)?stringtype=unspecified"
     }
 
-    @"
-# Nacos datasource config (auto-generated)
-spring.sql.init.platform=$dbType
-spring.datasource.platform=$dbType
-db.num=1
-db.url.0=$jdbc
-db.user.0=$user
-db.password.0=$passPlain
-"@ | Set-Content -Path $targetFile -Encoding UTF8
+    $configLines = @(
+        "# Nacos datasource config (auto-generated)",
+        "spring.sql.init.platform=$dbType",
+        "spring.datasource.platform=$dbType",
+        "db.num=1",
+        "db.url.0=$jdbc",
+        "db.user.0=$dbUser",
+        "db.password.0=$passPlain"
+    )
+    $configLines | Set-Content -Path $targetFile -Encoding UTF8
 
     Write-Host ""
     Write-Info "Datasource configuration saved to: $targetFile"
     Write-Host ""
     Write-Info "Configuration Summary:"
     Write-Host "  Platform:  $dbType"
-    Write-Host "  Host:      $host"
-    Write-Host "  Port:      $port"
+    Write-Host "  Host:      $dbHost"
+    Write-Host "  Port:      $dbPort"
     Write-Host "  Database:  $dbName"
-    Write-Host "  User:      $user"
+    Write-Host "  User:      $dbUser"
 }
 
 function Show-DatasourceConfig($configName = $null) {

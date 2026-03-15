@@ -173,24 +173,28 @@ function Get-Version {
     }
 
     # Check cached value
-    $cachedValue = $script:$cachedProp
-    if ($cachedValue) {
-        return $cachedValue
+    $cachedValue = Get-Variable -Name $cachedProp -Scope Script -ErrorAction SilentlyContinue
+    if ($cachedValue -and $cachedValue.Value) {
+        return $cachedValue.Value
     }
 
     # Try to fetch from remote (only once per script execution)
     if (-not $script:VersionsFetched) {
         if (Fetch-Versions -TimeoutSeconds $TimeoutSeconds) {
             # Re-check cached value after fetch
-            $cachedValue = $script:$cachedProp
-            if ($cachedValue) {
-                return $cachedValue
+            $cachedValue = Get-Variable -Name $cachedProp -Scope Script -ErrorAction SilentlyContinue
+            if ($cachedValue -and $cachedValue.Value) {
+                return $cachedValue.Value
             }
         }
     }
 
     # Return fallback version
-    return $script:$fallbackProp
+    $fallbackValue = Get-Variable -Name $fallbackProp -Scope Script -ErrorAction SilentlyContinue
+    if ($fallbackValue) {
+        return $fallbackValue.Value
+    }
+    return $null
 }
 
 # Get all versions at once (useful for installer)

@@ -59,6 +59,11 @@ _CACHED_SETUP_VERSION=""
 _CACHED_SERVER_VERSION=""
 _VERSIONS_FETCHED=false
 
+# Helper function for version warnings
+_versions_print_warn() {
+    print_warn "$1"
+}
+
 # Fetch versions from remote URL
 fetch_versions() {
     local timeout=${1:-1}
@@ -85,9 +90,15 @@ fetch_versions() {
     fi
     
     # Use fallback if cache is empty
-    [ -z "$_CACHED_CLI_VERSION" ] && _CACHED_CLI_VERSION="$FALLBACK_NACOS_CLI_VERSION"
-    [ -z "$_CACHED_SETUP_VERSION" ] && _CACHED_SETUP_VERSION="$FALLBACK_NACOS_SETUP_VERSION"
-    [ -z "$_CACHED_SERVER_VERSION" ] && _CACHED_SERVER_VERSION="$FALLBACK_NACOS_SERVER_VERSION"
+    if [ -z "$_CACHED_CLI_VERSION" ]; then
+        _CACHED_CLI_VERSION="$FALLBACK_NACOS_CLI_VERSION"
+    fi
+    if [ -z "$_CACHED_SETUP_VERSION" ]; then
+        _CACHED_SETUP_VERSION="$FALLBACK_NACOS_SETUP_VERSION"
+    fi
+    if [ -z "$_CACHED_SERVER_VERSION" ]; then
+        _CACHED_SERVER_VERSION="$FALLBACK_NACOS_SERVER_VERSION"
+    fi
 }
 
 # Get all versions at once
@@ -95,9 +106,15 @@ get_all_versions() {
     local timeout=${1:-5}
     
     # Check environment variables first
-    [ -n "$NACOS_CLI_VERSION" ] && _CACHED_CLI_VERSION="$NACOS_CLI_VERSION"
-    [ -n "$NACOS_SETUP_VERSION" ] && _CACHED_SETUP_VERSION="$NACOS_SETUP_VERSION"
-    [ -n "$NACOS_SERVER_VERSION" ] && _CACHED_SERVER_VERSION="$NACOS_SERVER_VERSION"
+    if [ -n "$NACOS_CLI_VERSION" ]; then
+        _CACHED_CLI_VERSION="$NACOS_CLI_VERSION"
+    fi
+    if [ -n "$NACOS_SETUP_VERSION" ]; then
+        _CACHED_SETUP_VERSION="$NACOS_SETUP_VERSION"
+    fi
+    if [ -n "$NACOS_SERVER_VERSION" ]; then
+        _CACHED_SERVER_VERSION="$NACOS_SERVER_VERSION"
+    fi
     
     # Fetch from remote if not set by env
     if [ -z "$NACOS_CLI_VERSION" ] || [ -z "$NACOS_SETUP_VERSION" ] || [ -z "$NACOS_SERVER_VERSION" ]; then

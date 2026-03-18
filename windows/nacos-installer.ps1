@@ -176,14 +176,99 @@ for ($i = 0; $i -lt $args.Count; $i++) {
 }
 
 # =============================
-# Load Version Management
+# Embedded Version Management (Self-contained, no external dependencies)
 # =============================
-$LibDir = Join-Path $PSScriptRoot "lib"
-if (Test-Path (Join-Path $LibDir "versions.ps1")) {
-    . (Join-Path $LibDir "versions.ps1")
+$script:DownloadBaseUrl = "https://download.nacos.io"
+$script:VersionsUrl = "$script:DownloadBaseUrl/versions"
+
+# Fallback Versions (used when versions file cannot be fetched)
+$script:FallbackNacosCliVersion = "0.0.8"
+$script:FallbackNacosSetupVersion = "0.0.3"
+$script:FallbackNacosServerVersion = "3.2.0-BETA"
+
+# Cached versions
+$script:CachedCliVersion = ""
+$script:CachedSetupVersion = ""
+$script:CachedServerVersion = ""
+$script:VersionsFetched = $false
+
+function Fetch-Versions {
+    param([int]$TimeoutSeconds = 1)
+    
+    try {
+        $job = Start-Job {
+            param($url, $outFile)
+            try {
+                Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing -ErrorAction Stop
+                return $true
+            } catch {
+                return $false
+            }
+        } -ArgumentList $script:VersionsUrl, $tempFile
+        
+        $completed = $job | Wait-Job -Timeout $TimeoutSeconds
+        if ($completed) {
+            $result = Receive-Job $job
+            if ($result -eq $true -and (Test-Path $tempFile) -and (Get-Item $tempFile).Length -gt 0) {
+                $content = Get-Content $tempFile -Raw
+                $lines = $content -split "`r?`n"
+                foreach ($line in $lines) {
+                    if ($line -match "^NACOS_CLI_VERSION=(.+)$") { $script:CachedCliVersion = $matches[1].Trim() }
+                    elseif ($line -match "^NACOS_SETUP_VERSION=(.+)$") { $script:CachedSetupVersion = $matches[1].Trim() }
+                    elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$") { $script:CachedServerVersion = $matches[1].Trim() }
+                }
+                $script:VersionsFetched = $true
+                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+                Remove-Job $job -Force -ErrorAction SilentlyContinue
+                return $true
+            }
+        }
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+    catch {
+        return $false
+    }
 }
 
-# Runtime versions (will be populated from versions file)
+function Get-Version {
+    param(
+        [Parameter(Mandatory=$true)]
+        [ValidateSet("cli", "setup", "server")]
+        [string]$Component,
+        [int]$TimeoutSeconds = 1
+    )
+    
+    $envVarName = "NACOS_$($Component.ToUpper())_VERSION"
+    $envValue = [Environment]::GetEnvironmentVariable($envVarName)
+    if ($envValue) { return $envValue }
+    
+    $cachedProp = "Cached$($Component.Substring(0,1).ToUpper() + $Component.Substring(1))Version"
+    $cachedValue = Get-Variable -Name $cachedProp -Scope Script -ErrorAction SilentlyContinue
+    if ($cachedValue -and $cachedValue.Value) { return $cachedValue.Value }
+    
+    if (-not $script:VersionsFetched) {
+        $tempFile = [System.IO.Path]::GetTempFileName()
+        if (Fetch-Versions -TimeoutSeconds $TimeoutSeconds) {
+            $cachedValue = Get-Variable -Name $cachedProp -Scope Script -ErrorAction SilentlyContinue
+            if ($cachedValue -and $cachedValue.Value) { return $cachedValue.Value }
+        }
+    }
+    
+    $fallbackProp = "FallbackNacos$($Component.Substring(0,1).ToUpper() + $Component.Substring(1))Version"
+    $fallbackValue = Get-Variable -Name $fallbackProp -Scope Script -ErrorAction SilentlyContinue
+    if ($fallbackValue) { return $fallbackValue.Value }
+    return $null
+}
+
+function Get-AllVersions {
+    param([int]$TimeoutSeconds = 1)
+    $script:NacosCliVersion = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
+    $script:NacosSetupVersion = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
+    $script:NacosServerVersion = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
+}
+
+# Runtime versions
 $NacosCliVersion = ""
 $NacosSetupVersion = ""
 $NacosServerVersion = ""

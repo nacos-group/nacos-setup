@@ -37,10 +37,16 @@ function Refresh-SessionPath() {
 
 function Download-File($url, $output) {
     Write-Info "Downloading from $url"
+    
+    # Set Referer header to match bash script behavior (required by Aliyun OSS CDN)
+    $headers = @{
+        "Referer" = "https://nacos.io/download/nacos-server/?spm=nacos_install"
+    }
+    
     if ($PSVersionTable.PSVersion.Major -lt 6) {
-        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output
+        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers
     } else {
-        Invoke-WebRequest -Uri $url -OutFile $output
+        Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers
     }
 }
 

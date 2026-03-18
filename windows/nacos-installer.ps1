@@ -198,12 +198,7 @@ function Fetch-Versions {
     
     try {
         # Use Invoke-RestMethod for simpler content handling (like curl in bash script)
-        # -SkipHttpErrorCheck: Don't throw on HTTP errors (like curl -f)
-        # -MaximumRedirection: Follow redirects (like curl -L)
-        $response = Invoke-RestMethod -Uri $script:VersionsUrl `
-            -TimeoutSec $TimeoutSeconds `
-            -UseBasicParsing `
-            -ErrorAction Stop
+        $response = Invoke-RestMethod -Uri $script:VersionsUrl -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
         
         if ($response) {
             $content = $response

@@ -1,7 +1,8 @@
 # Nacos Setup Installer for Windows (PowerShell)
 # Installs nacos-setup (default) or nacos-cli (with -cli flag)
 
-$ErrorActionPreference = "Stop"
+# Use Continue to handle errors gracefully instead of exiting
+$ErrorActionPreference = "Continue"
 
 # =============================
 # Helpers (Define early for use in initialization)
@@ -266,7 +267,7 @@ function Get-Version {
 }
 
 function Get-AllVersions {
-    param([int]$TimeoutSeconds = 1)
+    param([int]$TimeoutSeconds = 5)
     $script:NacosCliVersion = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
     $script:NacosSetupVersion = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
     $script:NacosServerVersion = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
@@ -293,8 +294,13 @@ $SetupCmdName = "nacos-setup.cmd"
 
 # Initialize versions using the unified version manager
 function Initialize-Versions {
-    # Load all versions with 1 second timeout
-    Get-AllVersions -TimeoutSeconds 1
+    # Load all versions with timeout (increased to 5 seconds for reliability)
+    try {
+        Get-AllVersions -TimeoutSeconds 5
+    } catch {
+        Write-Warn "Version fetch failed: $($_.Exception.Message)"
+        Write-Warn "Using fallback versions"
+    }
 
     # Apply user-specified versions if provided
     if ($SetupVersion) {

@@ -1,8 +1,10 @@
-# Nacos Setup Installer for Windows (PowerShell)
+﻿# Nacos Setup Installer for Windows (PowerShell)
 # Installs nacos-setup (default) or nacos-cli (with -cli flag)
 
-# Use Continue to handle errors gracefully instead of exiting
+# NEVER exit on errors - always continue and report
 $ErrorActionPreference = "Continue"
+$WarningPreference = "Continue"
+$VerbosePreference = "Continue"
 
 # =============================
 # Helpers (Define early for use in initialization)
@@ -31,8 +33,11 @@ function Refresh-SessionPath() {
     # Refresh PATH in current session by combining Machine and User paths
     $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    $env:Path = "$machinePath;$userPath"
+    $newPath = "$machinePath;$userPath"
+    $env:Path = $newPath
+    $env:Path = $newPath + ";$SetupRootDir"
     Write-Info "PATH refreshed in current session"
+    Write-Info "You can now use: nacos-setup --help"
 }
 
 function Download-File($url, $output) {
@@ -74,7 +79,8 @@ function Remove-DirectorySafe($path) {
     }
 
     Write-ErrorMsg "Failed to remove $path. Please close any running nacos-setup processes and try again."
-    throw "Failed to remove directory: $path"
+    Write-ErrorMsg "Error: Failed to remove directory: $path"
+    return $false
 }
 
 # =============================
@@ -276,12 +282,12 @@ function Get-AllVersions {
     
     # Log which versions were actually used
     if ($script:VersionsFetched) {
-        Write-Info "✓ Remote versions fetched successfully"
+        Write-Info "鉁?Remote versions fetched successfully"
         Write-Info "  CLI: $($script:NacosCliVersion)"
         Write-Info "  Setup: $($script:NacosSetupVersion)"
         Write-Info "  Server: $($script:NacosServerVersion)"
     } else {
-        Write-Warn "✗ Could not fetch remote versions (network unavailable or file not found)"
+        Write-Warn "鉁?Could not fetch remote versions (network unavailable or file not found)"
         Write-Warn "  Using fallback versions instead"
         Write-Info "  CLI: $($script:NacosCliVersion)"
         Write-Info "  Setup: $($script:NacosSetupVersion)"
@@ -394,7 +400,7 @@ if ($InstallCli) {
         Write-ErrorMsg "Binary file not found in package. Expected: $expected"
         Write-Info "Available files in package:"
         Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { "  $($_.FullName)" }
-        throw "Binary file not found in package"
+        Write-ErrorMsg "Binary file not found in package"; return $false
     }
     
     Copy-Item -Path $binaryPath.FullName -Destination (Join-Path $InstallDir $BinName) -Force
@@ -472,13 +478,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
     $setupDir = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
     if (-not $setupDir) {
         Write-ErrorMsg "Failed to find extracted directory in $setupZipName"
-        throw "Failed to find extracted directory"
+        Write-ErrorMsg "Failed to find extracted directory"; return $false
     }
     
     $setupScriptInZip = Join-Path $setupDir.FullName $SetupScriptName
     if (-not (Test-Path $setupScriptInZip)) {
         Write-ErrorMsg "$SetupScriptName not found in package"
-        throw "$SetupScriptName not found in package"
+        Write-ErrorMsg "$SetupScriptName not found in package"; return $false
     }
     
     Copy-Item -Path (Join-Path $setupDir.FullName "*") -Destination $SetupInstallDir -Recurse -Force
@@ -486,7 +492,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
     $setupScriptPath = Join-Path $SetupInstallDir $SetupScriptName
     if (-not (Test-Path $setupScriptPath)) {
         Write-ErrorMsg "nacos-setup.ps1 not found after extraction"
-        throw "nacos-setup.ps1 not found after extraction"
+        Write-ErrorMsg "nacos-setup.ps1 not found after extraction"; return $false
     }
     
     $content = Get-Content -Path $setupScriptPath -Raw

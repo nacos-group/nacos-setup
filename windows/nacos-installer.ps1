@@ -194,32 +194,23 @@ $script:CachedServerVersion = ""
 $script:VersionsFetched = $false
 
 function Fetch-Versions {
-    param([int]$TimeoutSeconds = 1)
-    
-    $tempFile = [System.IO.Path]::GetTempFileName()
+    param([int]$TimeoutSeconds = 5)
     
     try {
-        $job = Start-Job {
-            param($url, $outFile)
-            try {
-                Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing -ErrorAction Stop
-                return $true
-            } catch {
-                return $false
-            }
-        } -ArgumentList $script:VersionsUrl, $tempFile
+        # Direct synchronous request (simpler and more reliable than Start-Job)
+        $response = Invoke-WebRequest -Uri $script:VersionsUrl -UseBasicParsing -TimeoutSec $TimeoutSeconds -ErrorAction Stop
         
-        $completed = $job | Wait-Job -Timeout $TimeoutSeconds
-        if ($completed) {
-            $result = Receive-Job $job
-            if ($result -eq $true -and (Test-Path $tempFile) -and (Get-Item $tempFile).Length -gt 0) {
-                $content = Get-Content $tempFile -Raw
-                $lines = $content -split "`r?`n"
-                foreach ($line in $lines) {
-                    if ($line -match "^NACOS_CLI_VERSION=(.+)$") { $script:CachedCliVersion = $matches[1].Trim() }
-                    elseif ($line -match "^NACOS_SETUP_VERSION=(.+)$") { $script:CachedSetupVersion = $matches[1].Trim() }
-                    elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$") { $script:CachedServerVersion = $matches[1].Trim() }
-                }
+        if ($response.StatusCode -eq 200 -and $response.Content) {
+            $content = $response.Content
+            $lines = $content -split "`r?`n"
+            foreach ($line in $lines) {
+                if ($line -match "^NACOS_CLI_VERSION=(.+)$") { $script:CachedCliVersion = $matches[1].Trim() }
+                elseif ($line -match "^NACOS_SETUP_VERSION=(.+)$") { $script:CachedSetupVersion = $matches[1].Trim() }
+                elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$") { $script:CachedServerVersion = $matches[1].Trim() }
+            }
+            
+            # Only mark as fetched if we got at least one version
+            if ($script:CachedCliVersion -or $script:CachedSetupVersion -or $script:CachedServerVersion) {
                 $script:VersionsFetched = $true
                 return $true
             }
@@ -227,13 +218,8 @@ function Fetch-Versions {
         return $false
     }
     catch {
+        Write-Warn "Fetch-Versions error: $($_.Exception.Message)"
         return $false
-    }
-    finally {
-        if (Test-Path $tempFile) {
-            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-        }
-        try { Remove-Job $job -Force -ErrorAction SilentlyContinue } catch {}
     }
 }
 
@@ -268,15 +254,22 @@ function Get-Version {
 
 function Get-AllVersions {
     param([int]$TimeoutSeconds = 5)
+    
+    Write-Info "Attempting to fetch versions from: $script:VersionsUrl"
+    
     $script:NacosCliVersion = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
     $script:NacosSetupVersion = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
     $script:NacosServerVersion = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
     
     # Log which versions were actually used
     if ($script:VersionsFetched) {
-        Write-Info "Remote versions fetched successfully from $script:VersionsUrl"
+        Write-Info "✓ Remote versions fetched successfully"
+        Write-Info "  CLI: $($script:NacosCliVersion)"
+        Write-Info "  Setup: $($script:NacosSetupVersion)"
+        Write-Info "  Server: $($script:NacosServerVersion)"
     } else {
-        Write-Warn "Could not fetch remote versions, using fallback versions"
+        Write-Warn "✗ Could not fetch remote versions (network unavailable or file not found)"
+        Write-Warn "  Using fallback versions instead"
     }
 }
 

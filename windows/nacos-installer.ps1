@@ -197,13 +197,19 @@ function Fetch-Versions {
     param([int]$TimeoutSeconds = 5)
     
     try {
-        # Direct synchronous request (simpler and more reliable than Start-Job)
-        $response = Invoke-WebRequest -Uri $script:VersionsUrl -UseBasicParsing -TimeoutSec $TimeoutSeconds -ErrorAction Stop
+        # Use Invoke-RestMethod for simpler content handling (like curl in bash script)
+        # -SkipHttpErrorCheck: Don't throw on HTTP errors (like curl -f)
+        # -MaximumRedirection: Follow redirects (like curl -L)
+        $response = Invoke-RestMethod -Uri $script:VersionsUrl `
+            -TimeoutSec $TimeoutSeconds `
+            -UseBasicParsing `
+            -ErrorAction Stop
         
-        if ($response.StatusCode -eq 200 -and $response.Content) {
-            $content = $response.Content
+        if ($response) {
+            $content = $response
             $lines = $content -split "`r?`n"
             foreach ($line in $lines) {
+                $line = $line.Trim()
                 if ($line -match "^NACOS_CLI_VERSION=(.+)$") { $script:CachedCliVersion = $matches[1].Trim() }
                 elseif ($line -match "^NACOS_SETUP_VERSION=(.+)$") { $script:CachedSetupVersion = $matches[1].Trim() }
                 elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$") { $script:CachedServerVersion = $matches[1].Trim() }

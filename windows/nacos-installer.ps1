@@ -258,9 +258,15 @@ function Get-AllVersions {
     
     Write-Info "Attempting to fetch versions from: $script:VersionsUrl"
     
-    $script:NacosCliVersion = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
-    $script:NacosSetupVersion = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
-    $script:NacosServerVersion = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
+    # Get versions and store in script scope
+    $cliVer = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
+    $setupVer = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
+    $serverVer = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
+    
+    # Set script-level variables
+    $script:NacosCliVersion = if ($cliVer) { $cliVer } else { $script:FallbackNacosCliVersion }
+    $script:NacosSetupVersion = if ($setupVer) { $setupVer } else { $script:FallbackNacosSetupVersion }
+    $script:NacosServerVersion = if ($serverVer) { $serverVer } else { $script:FallbackNacosServerVersion }
     
     # Log which versions were actually used
     if ($script:VersionsFetched) {
@@ -271,6 +277,9 @@ function Get-AllVersions {
     } else {
         Write-Warn "✗ Could not fetch remote versions (network unavailable or file not found)"
         Write-Warn "  Using fallback versions instead"
+        Write-Info "  CLI: $($script:NacosCliVersion)"
+        Write-Info "  Setup: $($script:NacosSetupVersion)"
+        Write-Info "  Server: $($script:NacosServerVersion)"
     }
 }
 
@@ -306,10 +315,15 @@ function Initialize-Versions {
         Write-Info "Using specified nacos-cli version: $CliVersion"
     }
 
-    # Set derived variables after version initialization
-    $script:SetupInstallDir = Join-Path $SetupRootDir $NacosSetupVersion
+    # Ensure we have valid versions (fallback if empty)
+    if (-not $script:NacosSetupVersion) { $script:NacosSetupVersion = $script:FallbackNacosSetupVersion }
+    if (-not $script:NacosCliVersion) { $script:NacosCliVersion = $script:FallbackNacosCliVersion }
+    if (-not $script:NacosServerVersion) { $script:NacosServerVersion = $script:FallbackNacosServerVersion }
 
-    Write-Info "Versions: CLI=$NacosCliVersion, Setup=$NacosSetupVersion, Server=$NacosServerVersion"
+    # Set derived variables after version initialization
+    $script:SetupInstallDir = Join-Path $SetupRootDir $script:NacosSetupVersion
+
+    Write-Info "Versions: CLI=$($script:NacosCliVersion), Setup=$($script:NacosSetupVersion), Server=$($script:NacosServerVersion)"
 }
 
 # =============================

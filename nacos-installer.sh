@@ -42,27 +42,72 @@ TEMP_DIR="/tmp/nacos-setup-install-$$"
 CACHE_DIR="${HOME}/.nacos/cache"  # 缓存目录
 
 # ============================================================================
-# Load Version Management
+# Version Management (embedded for standalone operation)
 # ============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SCRIPT_DIR/lib/versions.sh" ]; then
-    source "$SCRIPT_DIR/lib/versions.sh"
-elif [ -f "$SCRIPT_DIR/../lib/versions.sh" ]; then
-    source "$SCRIPT_DIR/../lib/versions.sh"
-fi
+DOWNLOAD_BASE_URL="https://download.nacos.io"
+VERSIONS_URL="${DOWNLOAD_BASE_URL}/versions"
 
-# Runtime versions (will be populated from versions file or fallback)
-NACOS_SETUP_VERSION=""
-NACOS_CLI_VERSION=""
-NACOS_SERVER_VERSION=""
+# Fallback Versions
+FALLBACK_NACOS_CLI_VERSION="0.0.8"
+FALLBACK_NACOS_SETUP_VERSION="0.0.4"
+FALLBACK_NACOS_SERVER_VERSION="3.2.0-BETA"
 
-# Initialize versions using the unified version manager
-init_versions() {
-    # Load all versions with 1 second timeout
-    get_all_versions 1
+# Cached versions
+_CACHED_CLI_VERSION=""
+_CACHED_SETUP_VERSION=""
+_CACHED_SERVER_VERSION=""
+_VERSIONS_FETCHED=false
+
+# Fetch versions from remote URL
+fetch_versions() {
+    local timeout=${1:-1}
     
-    print_info "Versions: CLI=$NACOS_CLI_VERSION, Setup=$NACOS_SETUP_VERSION, Server=$NACOS_SERVER_VERSION" >&2
+    if [ "$_VERSIONS_FETCHED" = true ]; then
+        return 0
+    fi
+    
+    _VERSIONS_FETCHED=true
+    
+    # Try to fetch versions file
+    local versions_content
+    if versions_content=$(curl -fSL --max-time "$timeout" "$VERSIONS_URL" 2>/dev/null); then
+        # Parse the content
+        while IFS='=' read -r key value; do
+            case "$key" in
+                NACOS_CLI_VERSION) _CACHED_CLI_VERSION="$value" ;;
+                NACOS_SETUP_VERSION) _CACHED_SETUP_VERSION="$value" ;;
+                NACOS_SERVER_VERSION) _CACHED_SERVER_VERSION="$value" ;;
+            esac
+        done <<< "$versions_content"
+    else
+        _versions_print_warn "Failed to fetch versions from $VERSIONS_URL, using fallback versions"
+    fi
+    
+    # Use fallback if cache is empty
+    [ -z "$_CACHED_CLI_VERSION" ] && _CACHED_CLI_VERSION="$FALLBACK_NACOS_CLI_VERSION"
+    [ -z "$_CACHED_SETUP_VERSION" ] && _CACHED_SETUP_VERSION="$FALLBACK_NACOS_SETUP_VERSION"
+    [ -z "$_CACHED_SERVER_VERSION" ] && _CACHED_SERVER_VERSION="$FALLBACK_NACOS_SERVER_VERSION"
+}
+
+# Get all versions at once
+get_all_versions() {
+    local timeout=${1:-5}
+    
+    # Check environment variables first
+    [ -n "$NACOS_CLI_VERSION" ] && _CACHED_CLI_VERSION="$NACOS_CLI_VERSION"
+    [ -n "$NACOS_SETUP_VERSION" ] && _CACHED_SETUP_VERSION="$NACOS_SETUP_VERSION"
+    [ -n "$NACOS_SERVER_VERSION" ] && _CACHED_SERVER_VERSION="$NACOS_SERVER_VERSION"
+    
+    # Fetch from remote if not set by env
+    if [ -z "$NACOS_CLI_VERSION" ] || [ -z "$NACOS_SETUP_VERSION" ] || [ -z "$NACOS_SERVER_VERSION" ]; then
+        fetch_versions "$timeout"
+    fi
+    
+    # Export for use
+    NACOS_CLI_VERSION="$_CACHED_CLI_VERSION"
+    NACOS_SETUP_VERSION="$_CACHED_SETUP_VERSION"
+    NACOS_SERVER_VERSION="$_CACHED_SERVER_VERSION"
 }
 
 # ============================================================================
@@ -741,7 +786,8 @@ main() {
     echo ""
 
     # Initialize versions (fetch from remote or use fallback)
-    init_versions
+    get_all_versions 1
+    print_info "Versions: CLI=$NACOS_CLI_VERSION, Setup=$NACOS_SETUP_VERSION, Server=$NACOS_SERVER_VERSION" >&2
     echo ""
 
     # Parse arguments

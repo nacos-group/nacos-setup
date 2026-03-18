@@ -400,7 +400,8 @@ if ($InstallCli) {
         Write-ErrorMsg "Binary file not found in package. Expected: $expected"
         Write-Info "Available files in package:"
         Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { "  $($_.FullName)" }
-        Write-ErrorMsg "Binary file not found in package"; return $false
+        Write-ErrorMsg 'Binary file not found in package'
+        return
     }
     
     Copy-Item -Path $binaryPath.FullName -Destination (Join-Path $InstallDir $BinName) -Force
@@ -478,13 +479,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
     $setupDir = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
     if (-not $setupDir) {
         Write-ErrorMsg "Failed to find extracted directory in $setupZipName"
-        Write-ErrorMsg "Failed to find extracted directory"; return $false
+        Write-ErrorMsg 'Failed to find extracted directory'
+        return
     }
     
     $setupScriptInZip = Join-Path $setupDir.FullName $SetupScriptName
     if (-not (Test-Path $setupScriptInZip)) {
         Write-ErrorMsg "$SetupScriptName not found in package"
-        Write-ErrorMsg "$SetupScriptName not found in package"; return $false
+        Write-ErrorMsg '$SetupScriptName not found in package'
+        return
     }
     
     Copy-Item -Path (Join-Path $setupDir.FullName "*") -Destination $SetupInstallDir -Recurse -Force
@@ -492,7 +495,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
     $setupScriptPath = Join-Path $SetupInstallDir $SetupScriptName
     if (-not (Test-Path $setupScriptPath)) {
         Write-ErrorMsg "nacos-setup.ps1 not found after extraction"
-        Write-ErrorMsg "nacos-setup.ps1 not found after extraction"; return $false
+        Write-ErrorMsg 'nacos-setup.ps1 not found after extraction'
+        return
     }
     
     $content = Get-Content -Path $setupScriptPath -Raw
@@ -521,3 +525,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
     Write-Info "  nacos-setup --help"
     Write-Host ""
 }
+

@@ -195,6 +195,8 @@ $script:VersionsFetched = $false
 function Fetch-Versions {
     param([int]$TimeoutSeconds = 1)
     
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    
     try {
         $job = Start-Job {
             param($url, $outFile)
@@ -218,16 +220,19 @@ function Fetch-Versions {
                     elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$") { $script:CachedServerVersion = $matches[1].Trim() }
                 }
                 $script:VersionsFetched = $true
-                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-                Remove-Job $job -Force -ErrorAction SilentlyContinue
                 return $true
             }
         }
-        Remove-Job $job -Force -ErrorAction SilentlyContinue
         return $false
     }
     catch {
         return $false
+    }
+    finally {
+        if (Test-Path $tempFile) {
+            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+        }
+        try { Remove-Job $job -Force -ErrorAction SilentlyContinue } catch {}
     }
 }
 
@@ -248,7 +253,6 @@ function Get-Version {
     if ($cachedValue -and $cachedValue.Value) { return $cachedValue.Value }
     
     if (-not $script:VersionsFetched) {
-        $tempFile = [System.IO.Path]::GetTempFileName()
         if (Fetch-Versions -TimeoutSeconds $TimeoutSeconds) {
             $cachedValue = Get-Variable -Name $cachedProp -Scope Script -ErrorAction SilentlyContinue
             if ($cachedValue -and $cachedValue.Value) { return $cachedValue.Value }
@@ -266,6 +270,13 @@ function Get-AllVersions {
     $script:NacosCliVersion = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
     $script:NacosSetupVersion = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
     $script:NacosServerVersion = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
+    
+    # Log which versions were actually used
+    if ($script:VersionsFetched) {
+        Write-Info "Remote versions fetched successfully from $script:VersionsUrl"
+    } else {
+        Write-Warn "Could not fetch remote versions, using fallback versions"
+    }
 }
 
 # Runtime versions

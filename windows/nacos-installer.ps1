@@ -110,17 +110,8 @@ $realUserProfile = $env:USERPROFILE
 # If running as admin and USERPROFILE points to SYSTEM, try to find real user
 if ($isAdmin -and ($env:USERPROFILE -match 'systemprofile|system32')) {
     try {
-        # Try to get the logged-in user from Win32_ComputerSystem with timeout
-        $computerSystem = $null
-        $job = Start-Job { Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue }
-        $jobResult = $job | Wait-Job -Timeout 2
-        if ($jobResult) {
-            $computerSystem = Receive-Job -Job $job
-            Remove-Job -Job $job
-        } else {
-            Stop-Job -Job $job -ErrorAction SilentlyContinue
-            Remove-Job -Job $job -ErrorAction SilentlyContinue
-        }
+        # Try to get the logged-in user from Win32_ComputerSystem (direct call, no Job)
+        $computerSystem = Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue
         
         if ($computerSystem -and $computerSystem.UserName) {
             $userName = $computerSystem.UserName
@@ -239,29 +230,8 @@ function Fetch-Versions {
     try {
         $startTime = Get-Date
         
-        # Use Start-Job to ensure timeout works correctly
-        $job = Start-Job {
-            param($url, $timeout)
-            try {
-                Invoke-WebRequest -Uri $url -TimeoutSec $timeout -UseBasicParsing -ErrorAction Stop
-            } catch {
-                return $null
-            }
-        } -ArgumentList $script:VersionsUrl, $TimeoutSeconds
-        
-        $jobResult = $job | Wait-Job -Timeout $TimeoutSeconds
-        $response = $null
-        
-        if ($jobResult) {
-            $response = Receive-Job -Job $job
-            Remove-Job -Job $job
-        } else {
-            # Timeout - stop the job
-            Stop-Job -Job $job -ErrorAction SilentlyContinue
-            Remove-Job -Job $job -ErrorAction SilentlyContinue
-            Write-Warn "Version fetch timed out after ${TimeoutSeconds}s"
-            return $false
-        }
+        # Direct synchronous request (more reliable in pipeline mode)
+        $response = Invoke-WebRequest -Uri $script:VersionsUrl -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
         
         $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds, 2)
         
@@ -272,22 +242,18 @@ function Fetch-Versions {
             } else {
                 $response.Content
             }
-            Write-Info "Response content length: $($content.Length) chars"
             $lines = $content -split "`r?`n"
             
             foreach ($line in $lines) {
                 $line = $line.Trim()
                 if ($line -match "^NACOS_CLI_VERSION=(.+)$") { 
                     $script:CachedCliVersion = $matches[1].Trim()
-                    Write-Info "Found CLI version: $($script:CachedCliVersion)"
                 }
                 elseif ($line -match "^NACOS_SETUP_VERSION=(.+)$") { 
                     $script:CachedSetupVersion = $matches[1].Trim()
-                    Write-Info "Found Setup version: $($script:CachedSetupVersion)"
                 }
                 elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$") { 
                     $script:CachedServerVersion = $matches[1].Trim()
-                    Write-Info "Found Server version: $($script:CachedServerVersion)"
                 }
             }
             

@@ -266,19 +266,28 @@ function Fetch-Versions {
         $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds, 2)
         
         if ($response -and $response.StatusCode -eq 200 -and $response.Content) {
-            $content = $response.Content
+            # Ensure content is treated as string
+            $content = if ($response.Content -is [byte[]]) {
+                [System.Text.Encoding]::UTF8.GetString($response.Content)
+            } else {
+                $response.Content
+            }
+            Write-Info "Response content length: $($content.Length) chars"
             $lines = $content -split "`r?`n"
             
             foreach ($line in $lines) {
                 $line = $line.Trim()
                 if ($line -match "^NACOS_CLI_VERSION=(.+)$") { 
                     $script:CachedCliVersion = $matches[1].Trim()
+                    Write-Info "Found CLI version: $($script:CachedCliVersion)"
                 }
                 elseif ($line -match "^NACOS_SETUP_VERSION=(.+)$") { 
                     $script:CachedSetupVersion = $matches[1].Trim()
+                    Write-Info "Found Setup version: $($script:CachedSetupVersion)"
                 }
                 elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$") { 
                     $script:CachedServerVersion = $matches[1].Trim()
+                    Write-Info "Found Server version: $($script:CachedServerVersion)"
                 }
             }
             

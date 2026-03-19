@@ -1,8 +1,9 @@
-﻿# Nacos Setup Installer for Windows (PowerShell)
+# Nacos Setup Installer for Windows (PowerShell)
 # Installs nacos-setup (default) or nacos-cli (with -cli flag)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+
 
 Write-Host ""
 Write-Host "========================================"

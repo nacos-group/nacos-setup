@@ -59,7 +59,7 @@ function Download-File($url, $output) {
         } else {
             Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers
         }
-        $elapsed = (Get-Date - $startTime).TotalSeconds
+        $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds, 2)
         if (Test-Path $output) {
             $size = (Get-Item $output).Length
             Write-Success "Downloaded ${size} bytes in ${elapsed}s"
@@ -263,7 +263,7 @@ function Fetch-Versions {
             return $false
         }
         
-        $elapsed = (Get-Date - $startTime).TotalSeconds
+        $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds, 2)
         
         if ($response -and $response.StatusCode -eq 200 -and $response.Content) {
             $content = $response.Content

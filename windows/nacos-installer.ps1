@@ -138,37 +138,11 @@ $realUserProfile = $env:USERPROFILE
 
 # If running as admin and USERPROFILE points to SYSTEM, try to find real user
 if ($isAdmin -and ($env:USERPROFILE -match 'systemprofile|system32')) {
-    try {
-        # Try to get the logged-in user from Win32_ComputerSystem (direct call, no Job)
-        $computerSystem = Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue
-        
-        if ($computerSystem -and $computerSystem.UserName) {
-            $userName = $computerSystem.UserName
-            # Extract just the username if it's in DOMAIN\USER format
-            if ($userName -match '\\(.+)$') {
-                $userName = $matches[1]
-            }
-            # Verify the user directory exists
-            $userDir = "C:\Users\$userName"
-            if (Test-Path $userDir) {
-                $realUserProfile = $userDir
-            }
-        }
-    } catch {
-        # If WMI fails, try alternative methods
-    }
-    
-    # If still not found, try to find from environment or registry
-    if ($realUserProfile -match 'systemprofile|system32') {
-        try {
-            # Try LOGONSERVER environment variable (works in some scenarios)
-            if ($env:USERNAME -and $env:USERNAME -ne 'SYSTEM') {
-                $userDir = "C:\Users\$env:USERNAME"
-                if (Test-Path $userDir) {
-                    $realUserProfile = $userDir
-                }
-            }
-        } catch {
+    # Try LOGONSERVER environment variable first (works in most scenarios)
+    if ($env:USERNAME -and $env:USERNAME -ne 'SYSTEM') {
+        $userDir = "C:\Users\$env:USERNAME"
+        if (Test-Path $userDir) {
+            $realUserProfile = $userDir
         }
     }
     

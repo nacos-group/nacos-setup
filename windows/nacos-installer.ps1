@@ -427,23 +427,25 @@ if ($InstallCli) {
     
     Ensure-Directory $InstallDir
     Write-Info "Preparing to install nacos-cli version $NacosCliVersion..."
+    Write-Info "Target architecture: $os-$arch"
     
-    $os = "windows"
-    $arch = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "386" }
     $zipName = "nacos-cli-$NacosCliVersion-$os-$arch.zip"
     $zipPath = Join-Path $CacheDir $zipName
     $downloadUrl = "$DownloadBaseUrl/$zipName"
     
     if (-not (Test-Path $zipPath) -or (Get-Item $zipPath).Length -eq 0) {
+        Write-Info "Downloading nacos-cli from: $downloadUrl"
         Download-File $downloadUrl $zipPath
+        Write-Success "Download completed: $zipName"
     } else {
-        Write-Info "Found cached package: $zipPath"
+        Write-Info "Using cached package: $zipPath"
     }
     
-    Write-Info "Extracting nacos-cli..."
+    Write-Info "Extracting nacos-cli package..."
     $extractDir = Join-Path $env:TEMP ("nacos-cli-extract-" + [Guid]::NewGuid().ToString())
     Ensure-Directory $extractDir
     Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+    Write-Success "Extraction completed"
     
     $expected = "nacos-cli-$NacosCliVersion-$os-$arch.exe"
     $binaryPath = Get-ChildItem -Path $extractDir -Recurse -Filter $expected | Select-Object -First 1
@@ -455,10 +457,18 @@ if ($InstallCli) {
         return
     }
     
+    Write-Info "Copying binary to installation directory..."
     Copy-Item -Path $binaryPath.FullName -Destination (Join-Path $InstallDir $BinName) -Force
-    Add-ToUserPath $InstallDir
-    Remove-Item -Recurse -Force $extractDir
+    Write-Success "Binary installed: $InstallDir\$BinName"
     
+    Write-Info "Adding to user PATH..."
+    Add-ToUserPath $InstallDir
+    
+    Write-Info "Cleaning up temporary files..."
+    Remove-Item -Recurse -Force $extractDir
+    Write-Success "Cleanup completed"
+    
+    Write-Info "Refreshing session PATH..."
     Refresh-SessionPath
     
     Write-Host ""
@@ -480,19 +490,26 @@ if ($InstallCli) {
         $existingScript = Join-Path $SetupInstallDir $SetupScriptName
         if (Test-Path $existingScript) {
             Write-Info "nacos-setup $NacosSetupVersion is already installed at: $SetupInstallDir"
+            Write-Info "Updating command wrapper..."
             Ensure-Directory $SetupRootDir
             $rootCmdPath = Join-Path $SetupRootDir $SetupCmdName
             @"
 @echo off
 powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupScriptName" %*
 "@ | Set-Content -Path $rootCmdPath -Encoding ASCII
+            Write-Success "Command wrapper updated: $rootCmdPath"
+            
+            Write-Info "Adding to user PATH..."
             Add-ToUserPath $SetupRootDir
+            
+            Write-Info "Refreshing session PATH..."
             Refresh-SessionPath
+            
             Write-Host ""
             Write-Success "nacos-setup already installed."
             Write-Host ""
             Write-Info "Installation Summary:"
-            Write-Info "  Location: $SetupRootDir\\$SetupCmdName"
+            Write-Info "  Location: $SetupRootDir\$SetupCmdName"
             Write-Host ""
             Write-Success "You can now use the command:"
             Write-Info "  nacos-setup --help"
@@ -502,6 +519,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
         Write-Warn "nacos-setup directory exists but script is missing. Reinstalling..."
     }
     
+    Write-Info "Creating cache directory..."
     Ensure-Directory $CacheDir
     
     # Remove existing installation directory only if reinstalling this version
@@ -510,6 +528,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
         Remove-DirectorySafe $SetupInstallDir
     }
     
+    Write-Info "Creating installation directory: $SetupInstallDir"
     Ensure-Directory $SetupInstallDir
     
     $setupZipName = "nacos-setup-windows-$NacosSetupVersion.zip"
@@ -517,15 +536,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
     $setupZipUrl = "$DownloadBaseUrl/$setupZipName"
     
     if (-not (Test-Path $setupZipPath) -or (Get-Item $setupZipPath).Length -eq 0) {
+        Write-Info "Downloading nacos-setup from: $setupZipUrl"
         Download-File $setupZipUrl $setupZipPath
+        Write-Success "Download completed: $setupZipName"
     } else {
-        Write-Info "Found cached package: $setupZipPath"
+        Write-Info "Using cached package: $setupZipPath"
     }
     
-    Write-Info "Extracting nacos-setup windows scripts..."
+    Write-Info "Extracting nacos-setup package..."
     $extractDir = Join-Path $env:TEMP ("nacos-setup-windows-extract-" + [Guid]::NewGuid().ToString())
     Ensure-Directory $extractDir
     Expand-Archive -Path $setupZipPath -DestinationPath $extractDir -Force
+    Write-Success "Extraction completed"
     
     $setupDir = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
     if (-not $setupDir) {
@@ -541,7 +563,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
         return
     }
     
+    Write-Info "Copying files to installation directory..."
     Copy-Item -Path (Join-Path $setupDir.FullName "*") -Destination $SetupInstallDir -Recurse -Force
+    Write-Success "Files copied to: $SetupInstallDir"
     
     $setupScriptPath = Join-Path $SetupInstallDir $SetupScriptName
     if (-not (Test-Path $setupScriptPath)) {
@@ -550,20 +574,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
         return
     }
     
+    Write-Info "Fixing encoding issues in script..."
     $content = Get-Content -Path $setupScriptPath -Raw
     $content = $content -replace "[\u2018\u2019]", "'"
     $content = $content -replace "[\u201C\u201D]", '"'
     Set-Content -Path $setupScriptPath -Value $content -Encoding UTF8
-    Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
+    Write-Success "Encoding fixed"
     
+    Write-Info "Cleaning up temporary files..."
+    Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
+    Write-Success "Cleanup completed"
+    
+    Write-Info "Creating command wrapper..."
     Ensure-Directory $SetupRootDir
     $setupCmdPath = Join-Path $SetupRootDir $SetupCmdName
     @"
 @echo off
 powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupScriptName" %*
 "@ | Set-Content -Path $setupCmdPath -Encoding ASCII
+    Write-Success "Command wrapper created: $setupCmdPath"
     
+    Write-Info "Adding to user PATH..."
     Add-ToUserPath $SetupRootDir
+    
+    Write-Info "Refreshing session PATH..."
     Refresh-SessionPath
     
     Write-Host ""

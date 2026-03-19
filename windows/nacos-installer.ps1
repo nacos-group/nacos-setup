@@ -7,18 +7,14 @@ $ErrorActionPreference = "Continue"
 $WarningPreference = "Continue"
 $VerbosePreference = "Continue"
 
-# Progress preference: use SilentlyContinue in pipeline mode to prevent hanging
-if ([Console]::IsInputRedirected -or $Host.Name -eq 'Windows PowerShell ISE Host') {
-    $ProgressPreference = "SilentlyContinue"
-} else {
-    $ProgressPreference = "Continue"
-}
+# ALWAYS disable progress bar for iwr|iex compatibility
+$ProgressPreference = "SilentlyContinue"
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Nacos Installer (Windows)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "[INFO] Script starting..." -ForegroundColor Cyan
+Write-Host "[INFO] Script loading..." -ForegroundColor Cyan
 
 # =============================
 # Helpers (Define early for use in initialization)
@@ -427,8 +423,10 @@ function Initialize-Versions {
 # =============================
 # Main
 # =============================
+Write-Host "[INFO] Entering Main section..." -ForegroundColor Cyan
 
 # Initialize versions
+Write-Host "[INFO] Initializing versions..." -ForegroundColor Cyan
 Initialize-Versions
 Write-Host ""
 
@@ -443,6 +441,7 @@ if ($InstallCli) {
     Write-Info "Installing nacos-setup (use 'nacos-setup --help' for usage)"
 }
 
+Write-Host "[INFO] Creating cache directory..." -ForegroundColor Cyan
 Ensure-Directory $CacheDir
 
 if ($InstallCli) {

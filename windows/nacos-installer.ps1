@@ -1,27 +1,21 @@
 ﻿# Nacos Setup Installer for Windows (PowerShell)
 # Installs nacos-setup (default) or nacos-cli (with -cli flag)
-# Optimized for iwr ... | iex execution
 
-# NEVER exit on errors - always continue and report
-$ErrorActionPreference = "Continue"
-$WarningPreference = "Continue"
-$VerbosePreference = "Continue"
-
-# ALWAYS disable progress bar for iwr|iex compatibility
+$ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Nacos Installer (Windows)" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "[INFO] Script loading..." -ForegroundColor Cyan
+Write-Host "========================================"
+Write-Host "  Nacos Installer (Windows)"
+Write-Host "========================================"
+Write-Host ""
 
 # =============================
-# Helpers (Define early for use in initialization)
+# Helpers
 # =============================
-function Write-Info($msg) { Write-Host "[INFO] $msg" -ForegroundColor Cyan }
-function Write-Success($msg) { Write-Host "[SUCCESS] $msg" -ForegroundColor Green }
-function Write-Warn($msg) { Write-Host "[WARN] $msg" -ForegroundColor Yellow }
+function Write-Info($msg)     { Write-Host "[INFO] $msg" -ForegroundColor Cyan }
+function Write-Success($msg)  { Write-Host "[SUCCESS] $msg" -ForegroundColor Green }
+function Write-Warn($msg)     { Write-Host "[WARN] $msg" -ForegroundColor Yellow }
 function Write-ErrorMsg($msg) { Write-Host "[ERROR] $msg" -ForegroundColor Red }
 
 function Ensure-Directory($path) {
@@ -30,9 +24,9 @@ function Ensure-Directory($path) {
 
 function Add-ToUserPath($dir) {
     $current = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ($current -and $current.Split(';') -contains $dir) { 
+    if ($current -and $current.Split(';') -contains $dir) {
         Write-Info "PATH already contains: $dir"
-        return 
+        return
     }
     $newPath = if ($current) { "$current;$dir" } else { $dir }
     [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
@@ -40,75 +34,23 @@ function Add-ToUserPath($dir) {
 }
 
 function Refresh-SessionPath() {
-    # Refresh PATH in current session by combining Machine and User paths
     $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    $newPath = "$machinePath;$userPath"
-    $env:Path = $newPath
-    $env:Path = $newPath + ";$SetupRootDir"
+    $userPath    = [Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path    = "$machinePath;$userPath"
     Write-Info "PATH refreshed in current session"
-    Write-Info "You can now use: nacos-setup --help"
 }
 
 function Download-File($url, $output) {
-    Write-Info "Downloading from: $url"
-    
-    # Set Referer header to match bash script behavior (required by Aliyun OSS CDN)
-    $referer = "https://nacos.io/download/nacos-server/?spm=nacos_install"
-    
-    try {
-        $startTime = Get-Date
-        
-        # Prefer curl for better timeout control, fallback to Invoke-WebRequest
-        $useCurl = $false
-        try {
-            $curlVersion = curl --version 2>$null
-            if ($curlVersion) { $useCurl = $true }
-        } catch {}
-        
-        if ($useCurl) {
-            Write-Info "Using curl for download (connect-timeout: 30s, max-time: 300s)..."
-            # Use curl with 30s connect timeout and 300s max time
-            $curlArgs = @(
-                "-L",                           # Follow redirects
-                "-o", $output,                  # Output file
-                "--connect-timeout", "30",      # Connect timeout
-                "--max-time", "300",            # Total max time
-                "-H", "Referer: $referer",      # Referer header
-                $url
-            )
-            & curl @curlArgs 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                throw "curl failed with exit code $LASTEXITCODE"
-            }
-        } else {
-            Write-Info "curl not available, using Invoke-WebRequest for download..."
-            # Fallback to Invoke-WebRequest
-            $headers = @{
-                "Referer" = $referer
-            }
-            if ($PSVersionTable.PSVersion.Major -lt 6) {
-                Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers
-            } else {
-                Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers
-            }
-        }
-        
-        $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds, 2)
-        if (Test-Path $output) {
-            $size = (Get-Item $output).Length
-            Write-Success "Downloaded ${size} bytes in ${elapsed}s"
-        }
-    }
-    catch {
-        Write-ErrorMsg "Download failed: $($_.Exception.Message)"
-        throw
+    Write-Info "Downloading from $url"
+    if ($PSVersionTable.PSVersion.Major -lt 6) {
+        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output
+    } else {
+        Invoke-WebRequest -Uri $url -OutFile $output
     }
 }
 
 function Remove-DirectorySafe($path) {
     if (-not (Test-Path $path)) { return }
-
     Write-Warn "Attempting to stop processes using: $path"
     try {
         $procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
@@ -117,539 +59,276 @@ function Remove-DirectorySafe($path) {
             try { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
         }
     } catch {}
-
     $tries = 0
     while ($tries -lt 5) {
-        try {
-            Remove-Item -Recurse -Force $path -ErrorAction Stop
-            return
-        } catch {
-            Start-Sleep -Seconds 1
-        }
+        try { Remove-Item -Recurse -Force $path -ErrorAction Stop; return } catch { Start-Sleep -Seconds 1 }
         $tries++
     }
-
     Write-ErrorMsg "Failed to remove $path. Please close any running nacos-setup processes and try again."
-    Write-ErrorMsg "Error: Failed to remove directory: $path"
-    return $false
+    throw "Failed to remove directory: $path"
+}
+
+# =============================
+# Version Management
+# =============================
+# 默认版本号（远端获取失败时使用）
+$DefaultNacosCliVersion    = "0.0.2"
+$DefaultNacosSetupVersion  = "0.0.1"
+$DefaultNacosServerVersion = "3.2.0"
+
+$Global:NacosCliVersion    = $DefaultNacosCliVersion
+$Global:NacosSetupVersion  = $DefaultNacosSetupVersion
+$Global:NacosServerVersion = $DefaultNacosServerVersion
+
+function Fetch-Versions {
+    param([int]$TimeoutSeconds = 3)
+    Write-Info "Fetching version info from remote..."
+    try {
+        $response = Invoke-WebRequest -Uri "https://download.nacos.io/versions" -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
+        if ($response -and $response.Content) {
+            $content = if ($response.Content -is [byte[]]) {
+                [System.Text.Encoding]::UTF8.GetString($response.Content)
+            } else {
+                $response.Content
+            }
+            foreach ($line in ($content -split "`r?`n")) {
+                $line = $line.Trim()
+                if     ($line -match "^NACOS_CLI_VERSION=(.+)$")   { $Global:NacosCliVersion    = $matches[1].Trim() }
+                elseif ($line -match "^NACOS_SETUP_VERSION=(.+)$") { $Global:NacosSetupVersion  = $matches[1].Trim() }
+                elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$"){ $Global:NacosServerVersion = $matches[1].Trim() }
+            }
+            Write-Success "Version info fetched: CLI=$Global:NacosCliVersion, Setup=$Global:NacosSetupVersion, Server=$Global:NacosServerVersion"
+            return
+        }
+    } catch {
+        Write-Warn "Failed to fetch versions: $($_.Exception.Message)"
+    }
+    Write-Warn "Using default versions: CLI=$Global:NacosCliVersion, Setup=$Global:NacosSetupVersion, Server=$Global:NacosServerVersion"
 }
 
 # =============================
 # Check Admin and Get Real User
 # =============================
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-
-# Get the actual user directory even when running as admin
 $realUserProfile = $env:USERPROFILE
 
-# If running as admin and USERPROFILE points to SYSTEM, try to find real user
 if ($isAdmin -and ($env:USERPROFILE -match 'systemprofile|system32')) {
-    # Try LOGONSERVER environment variable first (works in most scenarios)
-    if ($env:USERNAME -and $env:USERNAME -ne 'SYSTEM') {
-        $userDir = "C:\Users\$env:USERNAME"
-        if (Test-Path $userDir) {
-            $realUserProfile = $userDir
+    try {
+        $computerSystem = Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue
+        if ($computerSystem -and $computerSystem.UserName) {
+            $userName = $computerSystem.UserName
+            if ($userName -match '\\(.+)$') { $userName = $matches[1] }
+            $userDir = "C:\Users\$userName"
+            if (Test-Path $userDir) { $realUserProfile = $userDir }
         }
-    }
-    
-    # Last resort: scan for most recently modified user profile
+    } catch {}
+
     if ($realUserProfile -match 'systemprofile|system32') {
         try {
-            $profiles = @(Get-ChildItem "C:\Users" -Directory -ErrorAction SilentlyContinue | 
-                Where-Object { 
-                    $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') -and
-                    (Test-Path (Join-Path $_.FullName 'AppData'))
-                } | Sort-Object LastWriteTime -Descending)
-            
-            if ($profiles.Count -gt 0) {
-                $realUserProfile = $profiles[0].FullName
+            if ($env:USERNAME -and $env:USERNAME -ne 'SYSTEM') {
+                $userDir = "C:\Users\$env:USERNAME"
+                if (Test-Path $userDir) { $realUserProfile = $userDir }
             }
-        } catch {
-        }
+        } catch {}
     }
-    
-    # Final check: if still couldn't determine, use a reasonable fallback
+
+    if ($realUserProfile -match 'systemprofile|system32') {
+        try {
+            $profiles = @(Get-ChildItem "C:\Users" -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -notin @('Public','Default','Default User','All Users') -and (Test-Path (Join-Path $_.FullName 'AppData')) } |
+                Sort-Object LastWriteTime -Descending)
+            if ($profiles.Count -gt 0) { $realUserProfile = $profiles[0].FullName }
+        } catch {}
+    }
+
     if ($realUserProfile -match 'systemprofile|system32') {
         Write-Warn "Could not detect real user, using default install location"
         $realUserProfile = "C:\Users\Administrator"
     }
 }
 
-# Get real LocalAppData
 $realLocalAppData = Join-Path $realUserProfile "AppData\Local"
 
 # =============================
 # Parse Arguments
 # =============================
-$InstallCli = $false
+$InstallCli   = $false
 $SetupVersion = $null
-$CliVersion = $null
+$CliVersion   = $null
 
-# Parse arguments
+# 第一遍：先确定是否有 -cli（无论顺序）
+for ($i = 0; $i -lt $args.Count; $i++) {
+    if ($args[$i] -eq "-cli" -or $args[$i] -eq "--cli") {
+        $InstallCli = $true
+        break
+    }
+}
+
+# 第二遍：再解析 -v / --version，根据 $InstallCli 决定归属
 for ($i = 0; $i -lt $args.Count; $i++) {
     $arg = $args[$i]
-    switch ($arg) {
-        "-cli" { $InstallCli = $true }
-        "--cli" { $InstallCli = $true }
-        "-v" {
-            if ($i + 1 -lt $args.Count -and $args[$i + 1] -notmatch "^-") {
-                if ($InstallCli) {
-                    $CliVersion = $args[$i + 1]
-                } else {
-                    $SetupVersion = $args[$i + 1]
-                }
-                $i++
-            }
-        }
-        "--version" {
-            if ($i + 1 -lt $args.Count -and $args[$i + 1] -notmatch "^-") {
-                if ($InstallCli) {
-                    $CliVersion = $args[$i + 1]
-                } else {
-                    $SetupVersion = $args[$i + 1]
-                }
-                $i++
-            }
-        }
+    if (($arg -eq "-v" -or $arg -eq "--version") -and ($i + 1 -lt $args.Count) -and ($args[$i + 1] -notmatch "^-")) {
+        if ($InstallCli) { $CliVersion = $args[$i + 1] } else { $SetupVersion = $args[$i + 1] }
+        $i++
     }
 }
 
 # =============================
-# Embedded Version Management (Self-contained, no external dependencies)
+# Initialize Versions（只执行一次）
 # =============================
-$script:DownloadBaseUrl = "https://download.nacos.io"
-$script:VersionsUrl = "$script:DownloadBaseUrl/versions"
+Fetch-Versions -TimeoutSeconds 3
 
-# Fallback Versions (used when versions file cannot be fetched)
-$script:FallbackNacosCliVersion = "0.0.8"
-$script:FallbackNacosSetupVersion = "0.0.3"
-$script:FallbackNacosServerVersion = "3.2.0-BETA"
-
-# Cached versions
-$script:CachedCliVersion = ""
-$script:CachedSetupVersion = ""
-$script:CachedServerVersion = ""
-$script:VersionsFetched = $false
-
-function Fetch-Versions {
-    param([int]$TimeoutSeconds = 3)
-    
-    Write-Info "Fetching version info from remote (timeout: ${TimeoutSeconds}s)..."
-    
-    try {
-        $startTime = Get-Date
-        $content = $null
-        
-        # Prefer curl for better timeout control
-        $useCurl = $false
-        try {
-            $curlVersion = curl --version 2>$null
-            if ($curlVersion) { $useCurl = $true }
-        } catch {}
-        
-        if ($useCurl) {
-            Write-Info "Using curl to fetch versions (connect-timeout: ${TimeoutSeconds}s, max-time: $($TimeoutSeconds + 2)s)..."
-            # Use curl with specified timeout
-            $curlArgs = @(
-                "-s",                           # Silent mode
-                "-L",                           # Follow redirects
-                "--connect-timeout", $TimeoutSeconds,
-                "--max-time", ($TimeoutSeconds + 2),
-                $script:VersionsUrl
-            )
-            $content = & curl @curlArgs 2>$null
-            if ($LASTEXITCODE -ne 0) {
-                throw "curl failed with exit code $LASTEXITCODE"
-            }
-        } else {
-            Write-Info "curl not available, using Invoke-WebRequest to fetch versions (timeout: ${TimeoutSeconds}s)..."
-            # Fallback to Invoke-WebRequest
-            $response = Invoke-WebRequest -Uri $script:VersionsUrl -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
-            if ($response -and $response.Content) {
-                $content = if ($response.Content -is [byte[]]) {
-                    [System.Text.Encoding]::UTF8.GetString($response.Content)
-                } else {
-                    $response.Content
-                }
-            }
-        }
-        
-        $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds, 2)
-        
-        if ($content) {
-            $lines = $content -split "`r?`n"
-            
-            foreach ($line in $lines) {
-                $line = $line.Trim()
-                if ($line -match "^NACOS_CLI_VERSION=(.+)$") { 
-                    $script:CachedCliVersion = $matches[1].Trim()
-                }
-                elseif ($line -match "^NACOS_SETUP_VERSION=(.+)$") { 
-                    $script:CachedSetupVersion = $matches[1].Trim()
-                }
-                elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$") { 
-                    $script:CachedServerVersion = $matches[1].Trim()
-                }
-            }
-            
-            # Only mark as fetched if we got at least one version
-            if ($script:CachedCliVersion -or $script:CachedSetupVersion -or $script:CachedServerVersion) {
-                $script:VersionsFetched = $true
-                Write-Success "Version info fetched in ${elapsed}s"
-                return $true
-            } else {
-                Write-Warn "No versions found in response"
-            }
-        } else {
-            Write-Warn "Invalid response from server"
-        }
-        return $false
-    }
-    catch {
-        Write-Warn "Failed to fetch versions: $($_.Exception.Message)"
-        return $false
-    }
+# 用户手动指定版本时覆盖远端获取的版本
+if ($SetupVersion) {
+    $Global:NacosSetupVersion = $SetupVersion
+    Write-Info "Using specified nacos-setup version: $SetupVersion"
+}
+if ($CliVersion) {
+    $Global:NacosCliVersion = $CliVersion
+    Write-Info "Using specified nacos-cli version: $CliVersion"
 }
 
-function Get-Version {
-    param(
-        [Parameter(Mandatory=$true)]
-        [ValidateSet("cli", "setup", "server")]
-        [string]$Component,
-        [int]$TimeoutSeconds = 1
-    )
-    
-    $envVarName = "NACOS_$($Component.ToUpper())_VERSION"
-    $envValue = [Environment]::GetEnvironmentVariable($envVarName)
-    if ($envValue) { return $envValue }
-    
-    $cachedProp = "Cached$($Component.Substring(0,1).ToUpper() + $Component.Substring(1))Version"
-    $cachedValue = Get-Variable -Name $cachedProp -Scope Script -ErrorAction SilentlyContinue
-    if ($cachedValue -and $cachedValue.Value) { return $cachedValue.Value }
-    
-    if (-not $script:VersionsFetched) {
-        if (Fetch-Versions -TimeoutSeconds $TimeoutSeconds) {
-            $cachedValue = Get-Variable -Name $cachedProp -Scope Script -ErrorAction SilentlyContinue
-            if ($cachedValue -and $cachedValue.Value) { return $cachedValue.Value }
-        }
-    }
-    
-    $fallbackProp = "FallbackNacos$($Component.Substring(0,1).ToUpper() + $Component.Substring(1))Version"
-    $fallbackValue = Get-Variable -Name $fallbackProp -Scope Script -ErrorAction SilentlyContinue
-    if ($fallbackValue) { return $fallbackValue.Value }
-    return $null
-}
-
-function Get-AllVersions {
-    param([int]$TimeoutSeconds = 2)
-    
-    Write-Info "Resolving component versions..."
-    
-    try {
-        $cliVer = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
-        $setupVer = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
-        $serverVer = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
-        
-        # Set script-level variables
-        $script:NacosCliVersion = if ($cliVer) { $cliVer } else { $script:FallbackNacosCliVersion }
-        $script:NacosSetupVersion = if ($setupVer) { $setupVer } else { $script:FallbackNacosSetupVersion }
-        $script:NacosServerVersion = if ($serverVer) { $serverVer } else { $script:FallbackNacosServerVersion }
-        
-        # Log result
-        if ($script:VersionsFetched) {
-            Write-Success "Using remote versions"
-        } else {
-            Write-Warn "Using fallback versions"
-        }
-        Write-Info "CLI: $($script:NacosCliVersion) | Setup: $($script:NacosSetupVersion) | Server: $($script:NacosServerVersion)"
-    }
-    catch {
-        Write-Warn "Version resolution failed: $($_.Exception.Message)"
-        Write-Warn "Using fallback versions"
-        $script:NacosCliVersion = $script:FallbackNacosCliVersion
-        $script:NacosSetupVersion = $script:FallbackNacosSetupVersion
-        $script:NacosServerVersion = $script:FallbackNacosServerVersion
-    }
-}
-
-# Runtime versions
-$NacosCliVersion = ""
-$NacosSetupVersion = ""
-$NacosServerVersion = ""
-
-$CacheDir = Join-Path $realUserProfile ".nacos\cache"
-$InstallDir = Join-Path $realLocalAppData "Programs\nacos-cli"
-$BinName = "nacos-cli.exe"
-$SetupRootDir = Join-Path $realLocalAppData "Programs\nacos-setup"
+# =============================
+# Configuration
+# =============================
+$DownloadBaseUrl = "https://download.nacos.io"
+$CacheDir        = Join-Path $realUserProfile ".nacos\cache"
+$InstallDir      = Join-Path $realLocalAppData "Programs\nacos-cli"
+$BinName         = "nacos-cli.exe"
+$SetupRootDir    = Join-Path $realLocalAppData "Programs\nacos-setup"
 $SetupScriptName = "nacos-setup.ps1"
-$SetupCmdName = "nacos-setup.cmd"
-
-# Initialize versions using the unified version manager
-function Initialize-Versions {
-    # Load all versions with short timeout for iex compatibility
-    Write-Info "Initializing versions..."
-    try {
-        Get-AllVersions -TimeoutSeconds 3
-    } catch {
-        Write-Warn "Version fetch failed: $($_.Exception.Message)"
-        Write-Warn "Using fallback versions"
-        # Ensure we have valid fallback versions
-        $script:NacosCliVersion = $script:FallbackNacosCliVersion
-        $script:NacosSetupVersion = $script:FallbackNacosSetupVersion
-        $script:NacosServerVersion = $script:FallbackNacosServerVersion
-    }
-
-    # Apply user-specified versions if provided
-    if ($SetupVersion) {
-        $script:NacosSetupVersion = $SetupVersion
-        Write-Info "Using specified nacos-setup version: $SetupVersion"
-    }
-    if ($CliVersion) {
-        $script:NacosCliVersion = $CliVersion
-        Write-Info "Using specified nacos-cli version: $CliVersion"
-    }
-
-    # Ensure we have valid versions (fallback if empty)
-    if (-not $script:NacosSetupVersion) { $script:NacosSetupVersion = $script:FallbackNacosSetupVersion }
-    if (-not $script:NacosCliVersion) { $script:NacosCliVersion = $script:FallbackNacosCliVersion }
-    if (-not $script:NacosServerVersion) { $script:NacosServerVersion = $script:FallbackNacosServerVersion }
-
-    # Set derived variables after version initialization
-    $script:SetupInstallDir = Join-Path $SetupRootDir $script:NacosSetupVersion
-
-    Write-Info "Versions: CLI=$($script:NacosCliVersion), Setup=$($script:NacosSetupVersion), Server=$($script:NacosServerVersion)"
-}
+$SetupCmdName    = "nacos-setup.cmd"
 
 # =============================
 # Main
 # =============================
-Write-Host "[INFO] Entering Main section..." -ForegroundColor Cyan
-
-# Initialize versions
-Write-Host "[INFO] Initializing versions..." -ForegroundColor Cyan
-Initialize-Versions
-Write-Host ""
 
 if ($isAdmin) {
     Write-Warn "Running as Administrator detected"
     Write-Info "Installing to user directory: $realUserProfile"
 }
 
-if ($InstallCli) {
-    Write-Info "Installing nacos-cli only (use 'nacos-cli --help' for usage)"
-} else {
-    Write-Info "Installing nacos-setup (use 'nacos-setup --help' for usage)"
-}
-
-Write-Host "[INFO] Creating cache directory..." -ForegroundColor Cyan
 Ensure-Directory $CacheDir
 
 if ($InstallCli) {
     # =============================
-    # Install nacos-cli only
+    # Install nacos-cli
     # =============================
-    # Remove existing installation directory if it exists (fresh install)
+    Write-Info "Installing nacos-cli (use 'nacos-cli --help' for usage)"
+
     if (Test-Path $InstallDir) {
         Write-Warn "Removing existing nacos-cli installation at $InstallDir"
         Remove-Item -Recurse -Force $InstallDir
     }
-    
     Ensure-Directory $InstallDir
-    Write-Info "Preparing to install nacos-cli version $NacosCliVersion..."
-    Write-Info "Target architecture: $os-$arch"
-    
-    $zipName = "nacos-cli-$NacosCliVersion-$os-$arch.zip"
-    $zipPath = Join-Path $CacheDir $zipName
+
+    Write-Info "Preparing to install nacos-cli version $Global:NacosCliVersion..."
+    $os          = "windows"
+    $arch        = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "386" }
+    $zipName     = "nacos-cli-$Global:NacosCliVersion-$os-$arch.zip"
+    $zipPath     = Join-Path $CacheDir $zipName
     $downloadUrl = "$DownloadBaseUrl/$zipName"
-    
+
     if (-not (Test-Path $zipPath) -or (Get-Item $zipPath).Length -eq 0) {
-        Write-Info "Downloading nacos-cli from: $downloadUrl"
         Download-File $downloadUrl $zipPath
-        Write-Success "Download completed: $zipName"
     } else {
-        Write-Info "Using cached package: $zipPath"
+        Write-Info "Found cached package: $zipPath"
     }
-    
-    Write-Info "Extracting nacos-cli package..."
+
+    Write-Info "Extracting nacos-cli..."
     $extractDir = Join-Path $env:TEMP ("nacos-cli-extract-" + [Guid]::NewGuid().ToString())
     Ensure-Directory $extractDir
     Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
-    Write-Success "Extraction completed"
-    
-    $expected = "nacos-cli-$NacosCliVersion-$os-$arch.exe"
+
+    $expected   = "nacos-cli-$Global:NacosCliVersion-$os-$arch.exe"
     $binaryPath = Get-ChildItem -Path $extractDir -Recurse -Filter $expected | Select-Object -First 1
     if (-not $binaryPath) {
-        Write-ErrorMsg "Binary file not found in package. Expected: $expected"
-        Write-Info "Available files in package:"
-        Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { "  $($_.FullName)" }
-        Write-ErrorMsg 'Binary file not found in package'
-        return
+        Write-ErrorMsg "Binary not found in package. Expected: $expected"
+        Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { Write-Info "  $($_.FullName)" }
+        throw "Binary file not found in package"
     }
-    
-    Write-Info "Copying binary to installation directory..."
+
     Copy-Item -Path $binaryPath.FullName -Destination (Join-Path $InstallDir $BinName) -Force
-    Write-Success "Binary installed: $InstallDir\$BinName"
-    
-    Write-Info "Adding to user PATH..."
     Add-ToUserPath $InstallDir
-    
-    Write-Info "Cleaning up temporary files..."
     Remove-Item -Recurse -Force $extractDir
-    Write-Success "Cleanup completed"
-    
-    Write-Info "Refreshing session PATH..."
     Refresh-SessionPath
-    
+
     Write-Host ""
     Write-Success "nacos-cli installed successfully!"
-    Write-Host ""
-    Write-Info "Installation Summary:"
-    Write-Info "  Location: $InstallDir\\$BinName"
-    Write-Host ""
-    Write-Success "You can now use the command:"
-    Write-Info "  nacos-cli --help"
+    Write-Info "  Location: $InstallDir\$BinName"
     Write-Host ""
 } else {
     # =============================
-    # Install nacos-setup (default)
+    # Install nacos-setup
     # =============================
-    Write-Info "Preparing to install nacos-setup version $NacosSetupVersion..."
-    
+    Write-Info "Installing nacos-setup (use 'nacos-setup --help' for usage)"
+
+    $SetupInstallDir = Join-Path $SetupRootDir $Global:NacosSetupVersion
+    Write-Info "Preparing to install nacos-setup version $Global:NacosSetupVersion..."
+
     if (Test-Path $SetupInstallDir) {
         $existingScript = Join-Path $SetupInstallDir $SetupScriptName
         if (Test-Path $existingScript) {
-            Write-Info "nacos-setup $NacosSetupVersion is already installed at: $SetupInstallDir"
-            Write-Info "Updating command wrapper..."
-            Ensure-Directory $SetupRootDir
+            Write-Info "nacos-setup $Global:NacosSetupVersion is already installed at: $SetupInstallDir"
             $rootCmdPath = Join-Path $SetupRootDir $SetupCmdName
-            @"
-@echo off
-powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupScriptName" %*
-"@ | Set-Content -Path $rootCmdPath -Encoding ASCII
-            Write-Success "Command wrapper updated: $rootCmdPath"
-            
-            Write-Info "Adding to user PATH..."
+            "@echo off`npowershell -NoProfile -ExecutionPolicy Bypass -File `"${SetupInstallDir}\$SetupScriptName`" %*" | Set-Content -Path $rootCmdPath -Encoding ASCII
             Add-ToUserPath $SetupRootDir
-            
-            Write-Info "Refreshing session PATH..."
             Refresh-SessionPath
-            
             Write-Host ""
             Write-Success "nacos-setup already installed."
-            Write-Host ""
-            Write-Info "Installation Summary:"
             Write-Info "  Location: $SetupRootDir\$SetupCmdName"
-            Write-Host ""
-            Write-Success "You can now use the command:"
-            Write-Info "  nacos-setup --help"
             Write-Host ""
             return
         }
         Write-Warn "nacos-setup directory exists but script is missing. Reinstalling..."
-    }
-    
-    Write-Info "Creating cache directory..."
-    Ensure-Directory $CacheDir
-    
-    # Remove existing installation directory only if reinstalling this version
-    if (Test-Path $SetupInstallDir) {
-        Write-Warn "Removing existing nacos-setup installation at $SetupInstallDir"
         Remove-DirectorySafe $SetupInstallDir
     }
-    
-    Write-Info "Creating installation directory: $SetupInstallDir"
+
     Ensure-Directory $SetupInstallDir
-    
-    $setupZipName = "nacos-setup-windows-$NacosSetupVersion.zip"
+
+    $setupZipName = "nacos-setup-windows-$Global:NacosSetupVersion.zip"
     $setupZipPath = Join-Path $CacheDir $setupZipName
-    $setupZipUrl = "$DownloadBaseUrl/$setupZipName"
-    
+    $setupZipUrl  = "$DownloadBaseUrl/$setupZipName"
+
     if (-not (Test-Path $setupZipPath) -or (Get-Item $setupZipPath).Length -eq 0) {
-        Write-Info "Downloading nacos-setup from: $setupZipUrl"
         Download-File $setupZipUrl $setupZipPath
-        Write-Success "Download completed: $setupZipName"
     } else {
-        Write-Info "Using cached package: $setupZipPath"
+        Write-Info "Found cached package: $setupZipPath"
     }
-    
-    Write-Info "Extracting nacos-setup package..."
+
+    Write-Info "Extracting nacos-setup..."
     $extractDir = Join-Path $env:TEMP ("nacos-setup-windows-extract-" + [Guid]::NewGuid().ToString())
     Ensure-Directory $extractDir
     Expand-Archive -Path $setupZipPath -DestinationPath $extractDir -Force
-    Write-Success "Extraction completed"
-    
+
     $setupDir = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
-    if (-not $setupDir) {
-        Write-ErrorMsg "Failed to find extracted directory in $setupZipName"
-        Write-ErrorMsg 'Failed to find extracted directory'
-        return
-    }
-    
+    if (-not $setupDir) { throw "Failed to find extracted directory in $setupZipName" }
+
     $setupScriptInZip = Join-Path $setupDir.FullName $SetupScriptName
-    if (-not (Test-Path $setupScriptInZip)) {
-        Write-ErrorMsg "$SetupScriptName not found in package"
-        Write-ErrorMsg '$SetupScriptName not found in package'
-        return
-    }
-    
-    Write-Info "Copying files to installation directory..."
+    if (-not (Test-Path $setupScriptInZip)) { throw "$SetupScriptName not found in package" }
+
     Copy-Item -Path (Join-Path $setupDir.FullName "*") -Destination $SetupInstallDir -Recurse -Force
-    Write-Success "Files copied to: $SetupInstallDir"
-    
+
     $setupScriptPath = Join-Path $SetupInstallDir $SetupScriptName
-    if (-not (Test-Path $setupScriptPath)) {
-        Write-ErrorMsg "nacos-setup.ps1 not found after extraction"
-        Write-ErrorMsg 'nacos-setup.ps1 not found after extraction'
-        return
-    }
-    
-    Write-Info "Fixing encoding issues in script..."
+    if (-not (Test-Path $setupScriptPath)) { throw "nacos-setup.ps1 not found after extraction" }
+
+    # 修复编码问题
     $content = Get-Content -Path $setupScriptPath -Raw
     $content = $content -replace "[\u2018\u2019]", "'"
     $content = $content -replace "[\u201C\u201D]", '"'
     Set-Content -Path $setupScriptPath -Value $content -Encoding UTF8
-    Write-Success "Encoding fixed"
-    
-    Write-Info "Cleaning up temporary files..."
+
     Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
-    Write-Success "Cleanup completed"
-    
-    Write-Info "Creating command wrapper..."
+
     Ensure-Directory $SetupRootDir
     $setupCmdPath = Join-Path $SetupRootDir $SetupCmdName
-    @"
-@echo off
-powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupScriptName" %*
-"@ | Set-Content -Path $setupCmdPath -Encoding ASCII
-    Write-Success "Command wrapper created: $setupCmdPath"
-    
-    Write-Info "Adding to user PATH..."
+    "@echo off`npowershell -NoProfile -ExecutionPolicy Bypass -File `"${SetupInstallDir}\$SetupScriptName`" %*" | Set-Content -Path $setupCmdPath -Encoding ASCII
+
     Add-ToUserPath $SetupRootDir
-    
-    Write-Info "Refreshing session PATH..."
     Refresh-SessionPath
-    
+
     Write-Host ""
     Write-Success "nacos-setup installed successfully!"
-    Write-Host ""
-    Write-Info "Installation Summary:"
     Write-Info "  Location: $SetupRootDir\$SetupCmdName"
     Write-Host ""
-    Write-Success "You can now use the command:"
-    Write-Info "  nacos-setup --help"
-    Write-Host ""
 }
-
-# Pause to allow user to see the results before window closes (only in interactive mode)
-# Skip if running via iex (Invoke-Expression) or pipeline
-$isPipeline = [Console]::IsInputRedirected -or ($Host.Name -eq 'Windows PowerShell ISE Host') -or -not $Host.UI.RawUI.KeyAvailable
-if ($Host.Name -eq 'ConsoleHost' -and -not $env:CI -and -not $env:TF_BUILD -and -not $isPipeline) {
-    Write-Host ""
-    Write-Host "Press any key to exit..." -ForegroundColor Yellow
-    try {
-        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    } catch {
-        # If ReadKey fails (e.g., redirected input), just continue
-    }
-}
-

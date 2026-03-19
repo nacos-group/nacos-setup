@@ -41,17 +41,31 @@ function Refresh-SessionPath() {
 }
 
 function Download-File($url, $output) {
-    Write-Info "Downloading from $url"
+    Write-Host "[DEBUG] Download-File: Starting..." -ForegroundColor Gray
+    Write-Host "[DEBUG] Download-File: URL = $url" -ForegroundColor Gray
+    Write-Host "[DEBUG] Download-File: Output = $output" -ForegroundColor Gray
     
     # Set Referer header to match bash script behavior (required by Aliyun OSS CDN)
     $headers = @{
         "Referer" = "https://nacos.io/download/nacos-server/?spm=nacos_install"
     }
     
-    if ($PSVersionTable.PSVersion.Major -lt 6) {
-        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers
-    } else {
-        Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers
+    try {
+        $startTime = Get-Date
+        if ($PSVersionTable.PSVersion.Major -lt 6) {
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers
+        } else {
+            Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers
+        }
+        $elapsed = (Get-Date - $startTime).TotalSeconds
+        if (Test-Path $output) {
+            $size = (Get-Item $output).Length
+            Write-Host "[DEBUG] Download-File: SUCCESS - ${size} bytes in ${elapsed}s" -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Host "[DEBUG] Download-File: EXCEPTION - $($_.Exception.Message)" -ForegroundColor Red
+        throw
     }
 }
 
@@ -208,31 +222,56 @@ $script:VersionsFetched = $false
 function Fetch-Versions {
     param([int]$TimeoutSeconds = 3)
     
+    Write-Host "[DEBUG] Fetch-Versions: Starting..." -ForegroundColor Gray
+    Write-Host "[DEBUG] Fetch-Versions: URL = $script:VersionsUrl" -ForegroundColor Gray
+    Write-Host "[DEBUG] Fetch-Versions: Timeout = ${TimeoutSeconds}s" -ForegroundColor Gray
+    
     try {
-        # Use Invoke-WebRequest with explicit timeout (more reliable than Invoke-RestMethod)
+        Write-Host "[DEBUG] Fetch-Versions: Calling Invoke-WebRequest..." -ForegroundColor Gray
+        $startTime = Get-Date
         $response = Invoke-WebRequest -Uri $script:VersionsUrl -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
+        $elapsed = (Get-Date - $startTime).TotalSeconds
+        Write-Host "[DEBUG] Fetch-Versions: Response received in ${elapsed}s" -ForegroundColor Gray
+        Write-Host "[DEBUG] Fetch-Versions: StatusCode = $($response.StatusCode)" -ForegroundColor Gray
+        Write-Host "[DEBUG] Fetch-Versions: Content length = $($response.Content.Length) bytes" -ForegroundColor Gray
         
         if ($response.StatusCode -eq 200 -and $response.Content) {
             $content = $response.Content
             $lines = $content -split "`r?`n"
+            Write-Host "[DEBUG] Fetch-Versions: Parsing $($lines.Count) lines..." -ForegroundColor Gray
+            
             foreach ($line in $lines) {
                 $line = $line.Trim()
-                if ($line -match "^NACOS_CLI_VERSION=(.+)$") { $script:CachedCliVersion = $matches[1].Trim() }
-                elseif ($line -match "^NACOS_SETUP_VERSION=(.+)$") { $script:CachedSetupVersion = $matches[1].Trim() }
-                elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$") { $script:CachedServerVersion = $matches[1].Trim() }
+                if ($line -match "^NACOS_CLI_VERSION=(.+)$") { 
+                    $script:CachedCliVersion = $matches[1].Trim()
+                    Write-Host "[DEBUG] Fetch-Versions: Found CLI version = $($script:CachedCliVersion)" -ForegroundColor Gray
+                }
+                elseif ($line -match "^NACOS_SETUP_VERSION=(.+)$") { 
+                    $script:CachedSetupVersion = $matches[1].Trim()
+                    Write-Host "[DEBUG] Fetch-Versions: Found Setup version = $($script:CachedSetupVersion)" -ForegroundColor Gray
+                }
+                elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$") { 
+                    $script:CachedServerVersion = $matches[1].Trim()
+                    Write-Host "[DEBUG] Fetch-Versions: Found Server version = $($script:CachedServerVersion)" -ForegroundColor Gray
+                }
             }
             
             # Only mark as fetched if we got at least one version
             if ($script:CachedCliVersion -or $script:CachedSetupVersion -or $script:CachedServerVersion) {
                 $script:VersionsFetched = $true
-                Write-Info "Remote versions fetched successfully"
+                Write-Host "[DEBUG] Fetch-Versions: SUCCESS - versions fetched" -ForegroundColor Green
                 return $true
+            } else {
+                Write-Host "[DEBUG] Fetch-Versions: FAILED - no versions found in response" -ForegroundColor Yellow
             }
+        } else {
+            Write-Host "[DEBUG] Fetch-Versions: FAILED - invalid response" -ForegroundColor Yellow
         }
         return $false
     }
     catch {
-        Write-Warn "Fetch-Versions error: $($_.Exception.Message)"
+        Write-Host "[DEBUG] Fetch-Versions: EXCEPTION - $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[DEBUG] Fetch-Versions: Exception type = $($_.Exception.GetType().Name)" -ForegroundColor Gray
         return $false
     }
 }
@@ -269,13 +308,21 @@ function Get-Version {
 function Get-AllVersions {
     param([int]$TimeoutSeconds = 2)
     
-    Write-Info "Fetching versions (timeout: ${TimeoutSeconds}s)..."
+    Write-Host "[DEBUG] Get-AllVersions: Starting with timeout=${TimeoutSeconds}s" -ForegroundColor Gray
+    Write-Host "[DEBUG] Get-AllVersions: VersionsUrl = $script:VersionsUrl" -ForegroundColor Gray
     
     try {
-        # Get versions with short timeout
+        Write-Host "[DEBUG] Get-AllVersions: Fetching CLI version..." -ForegroundColor Gray
         $cliVer = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
+        Write-Host "[DEBUG] Get-AllVersions: CLI version = $cliVer" -ForegroundColor Gray
+        
+        Write-Host "[DEBUG] Get-AllVersions: Fetching Setup version..." -ForegroundColor Gray
         $setupVer = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
+        Write-Host "[DEBUG] Get-AllVersions: Setup version = $setupVer" -ForegroundColor Gray
+        
+        Write-Host "[DEBUG] Get-AllVersions: Fetching Server version..." -ForegroundColor Gray
         $serverVer = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
+        Write-Host "[DEBUG] Get-AllVersions: Server version = $serverVer" -ForegroundColor Gray
         
         # Set script-level variables
         $script:NacosCliVersion = if ($cliVer) { $cliVer } else { $script:FallbackNacosCliVersion }
@@ -284,13 +331,14 @@ function Get-AllVersions {
         
         # Log result
         if ($script:VersionsFetched) {
-            Write-Info "✓ Remote versions fetched"
+            Write-Host "[DEBUG] Get-AllVersions: Remote fetch SUCCESS" -ForegroundColor Green
         } else {
-            Write-Warn "⚠ Using fallback versions"
+            Write-Host "[DEBUG] Get-AllVersions: Using FALLBACK versions" -ForegroundColor Yellow
         }
         Write-Info "CLI: $($script:NacosCliVersion) | Setup: $($script:NacosSetupVersion) | Server: $($script:NacosServerVersion)"
     }
     catch {
+        Write-Host "[DEBUG] Get-AllVersions: EXCEPTION - $($_.Exception.Message)" -ForegroundColor Red
         Write-Warn "⚠ Version fetch error, using fallback"
         $script:NacosCliVersion = $script:FallbackNacosCliVersion
         $script:NacosSetupVersion = $script:FallbackNacosSetupVersion

@@ -6,6 +6,9 @@ $ErrorActionPreference = "Continue"
 $WarningPreference = "Continue"
 $VerbosePreference = "Continue"
 
+# Disable progress bar to prevent hanging in pipeline mode
+$ProgressPreference = "SilentlyContinue"
+
 # =============================
 # Helpers (Define early for use in initialization)
 # =============================

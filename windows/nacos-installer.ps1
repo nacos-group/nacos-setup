@@ -196,7 +196,7 @@ $script:VersionsUrl = "$script:DownloadBaseUrl/versions"
 
 # Fallback Versions (used when versions file cannot be fetched)
 $script:FallbackNacosCliVersion = "0.0.8"
-$script:FallbackNacosSetupVersion = "0.0.3"
+$script:FallbackNacosSetupVersion = "0.0.5"
 $script:FallbackNacosServerVersion = "3.2.0-BETA"
 
 # Cached versions
@@ -208,11 +208,40 @@ $script:VersionsFetched = $false
 function Fetch-Versions {
     param([int]$TimeoutSeconds = 3)
     
+    # Prevent multiple concurrent fetches
+    if ($script:VersionsFetched) {
+        return $true
+    }
+    
     try {
-        # Use Invoke-WebRequest with explicit timeout (more reliable than Invoke-RestMethod)
-        $response = Invoke-WebRequest -Uri $script:VersionsUrl -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
+        Write-Info "Fetching versions from remote..."
         
-        if ($response.StatusCode -eq 200 -and $response.Content) {
+        # Use Invoke-WebRequest with explicit timeout
+        $response = $null
+        $job = Start-Job {
+            param($url, $timeout)
+            try {
+                Invoke-WebRequest -Uri $url -TimeoutSec $timeout -UseBasicParsing -ErrorAction Stop
+            } catch {
+                return $null
+            }
+        } -ArgumentList $script:VersionsUrl, $TimeoutSeconds
+        
+        # Wait for job with timeout
+        $jobResult = $job | Wait-Job -Timeout $TimeoutSeconds
+        
+        if ($jobResult) {
+            $response = Receive-Job -Job $job
+            Remove-Job -Job $job
+        } else {
+            # Timeout - stop the job
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            Remove-Job -Job $job -ErrorAction SilentlyContinue
+            Write-Warn "Version fetch timed out after ${TimeoutSeconds}s"
+            return $false
+        }
+        
+        if ($response -and $response.StatusCode -eq 200 -and $response.Content) {
             $content = $response.Content
             $lines = $content -split "`r?`n"
             foreach ($line in $lines) {
@@ -253,8 +282,11 @@ function Get-Version {
     $cachedValue = Get-Variable -Name $cachedProp -Scope Script -ErrorAction SilentlyContinue
     if ($cachedValue -and $cachedValue.Value) { return $cachedValue.Value }
     
+    # Only fetch if not already fetched - prevent duplicate network calls
     if (-not $script:VersionsFetched) {
-        if (Fetch-Versions -TimeoutSeconds $TimeoutSeconds) {
+        # Use a slightly longer timeout for the actual fetch
+        $fetchTimeout = [Math]::Max($TimeoutSeconds, 3)
+        if (Fetch-Versions -TimeoutSeconds $fetchTimeout) {
             $cachedValue = Get-Variable -Name $cachedProp -Scope Script -ErrorAction SilentlyContinue
             if ($cachedValue -and $cachedValue.Value) { return $cachedValue.Value }
         }
@@ -272,15 +304,26 @@ function Get-AllVersions {
     Write-Info "Fetching versions (timeout: ${TimeoutSeconds}s)..."
     
     try {
-        # Get versions with short timeout
-        $cliVer = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
-        $setupVer = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
-        $serverVer = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
+        # Check environment variables first (fastest)
+        $envCli = [Environment]::GetEnvironmentVariable("NACOS_CLI_VERSION")
+        $envSetup = [Environment]::GetEnvironmentVariable("NACOS_SETUP_VERSION")
+        $envServer = [Environment]::GetEnvironmentVariable("NACOS_SERVER_VERSION")
         
-        # Set script-level variables
-        $script:NacosCliVersion = if ($cliVer) { $cliVer } else { $script:FallbackNacosCliVersion }
-        $script:NacosSetupVersion = if ($setupVer) { $setupVer } else { $script:FallbackNacosSetupVersion }
-        $script:NacosServerVersion = if ($serverVer) { $serverVer } else { $script:FallbackNacosServerVersion }
+        if ($envCli) { $script:CachedCliVersion = $envCli }
+        if ($envSetup) { $script:CachedSetupVersion = $envSetup }
+        if ($envServer) { $script:CachedServerVersion = $envServer }
+        
+        # Only fetch from remote if needed and not already fetched
+        $needFetch = (-not $envCli) -or (-not $envSetup) -or (-not $envServer)
+        if ($needFetch -and -not $script:VersionsFetched) {
+            # Pre-fetch all versions in one call with longer timeout
+            Fetch-Versions -TimeoutSeconds $TimeoutSeconds | Out-Null
+        }
+        
+        # Set final versions (prefer env > cached > fallback)
+        $script:NacosCliVersion = if ($envCli) { $envCli } elseif ($script:CachedCliVersion) { $script:CachedCliVersion } else { $script:FallbackNacosCliVersion }
+        $script:NacosSetupVersion = if ($envSetup) { $envSetup } elseif ($script:CachedSetupVersion) { $script:CachedSetupVersion } else { $script:FallbackNacosSetupVersion }
+        $script:NacosServerVersion = if ($envServer) { $envServer } elseif ($script:CachedServerVersion) { $script:CachedServerVersion } else { $script:FallbackNacosServerVersion }
         
         # Log result
         if ($script:VersionsFetched) {
@@ -291,7 +334,8 @@ function Get-AllVersions {
         Write-Info "CLI: $($script:NacosCliVersion) | Setup: $($script:NacosSetupVersion) | Server: $($script:NacosServerVersion)"
     }
     catch {
-        Write-Warn "⚠ Version fetch error, using fallback"
+        Write-Warn "⚠ Version fetch error: $($_.Exception.Message)"
+        Write-Warn "Using fallback versions"
         $script:NacosCliVersion = $script:FallbackNacosCliVersion
         $script:NacosSetupVersion = $script:FallbackNacosSetupVersion
         $script:NacosServerVersion = $script:FallbackNacosServerVersion
@@ -312,12 +356,17 @@ $SetupCmdName = "nacos-setup.cmd"
 
 # Initialize versions using the unified version manager
 function Initialize-Versions {
-    # Load all versions with timeout (increased to 5 seconds for reliability)
+    # Load all versions with short timeout for iex compatibility
+    # Use 2 seconds to avoid hanging when invoked via iex
     try {
-        Get-AllVersions -TimeoutSeconds 5
+        Get-AllVersions -TimeoutSeconds 2
     } catch {
         Write-Warn "Version fetch failed: $($_.Exception.Message)"
         Write-Warn "Using fallback versions"
+        # Ensure we have valid fallback versions
+        $script:NacosCliVersion = $script:FallbackNacosCliVersion
+        $script:NacosSetupVersion = $script:FallbackNacosSetupVersion
+        $script:NacosServerVersion = $script:FallbackNacosServerVersion
     }
 
     # Apply user-specified versions if provided
@@ -330,7 +379,7 @@ function Initialize-Versions {
         Write-Info "Using specified nacos-cli version: $CliVersion"
     }
 
-    # Ensure we have valid versions (fallback if empty)
+    # Final safety check - ensure we have valid versions
     if (-not $script:NacosSetupVersion) { $script:NacosSetupVersion = $script:FallbackNacosSetupVersion }
     if (-not $script:NacosCliVersion) { $script:NacosCliVersion = $script:FallbackNacosCliVersion }
     if (-not $script:NacosServerVersion) { $script:NacosServerVersion = $script:FallbackNacosServerVersion }

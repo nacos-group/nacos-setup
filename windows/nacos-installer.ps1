@@ -570,10 +570,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
     Write-Success "nacos-setup installed successfully!"
     Write-Host ""
     Write-Info "Installation Summary:"
-    Write-Info "  Location: $SetupRootDir\\$SetupCmdName"
+    Write-Info "  Location: $SetupRootDir\$SetupCmdName"
     Write-Host ""
     Write-Success "You can now use the command:"
     Write-Info "  nacos-setup --help"
     Write-Host ""
+}
+
+# Pause to allow user to see the results before window closes (only in interactive mode)
+if ($Host.Name -eq 'ConsoleHost' -and -not $env:CI -and -not $env:TF_BUILD) {
+    Write-Host ""
+    Write-Host "Press any key to exit..." -ForegroundColor Yellow
+    try {
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    } catch {
+        # If ReadKey fails (e.g., redirected input), just continue
+    }
 }
 

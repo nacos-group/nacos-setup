@@ -106,8 +106,18 @@ $realUserProfile = $env:USERPROFILE
 # If running as admin and USERPROFILE points to SYSTEM, try to find real user
 if ($isAdmin -and ($env:USERPROFILE -match 'systemprofile|system32')) {
     try {
-        # Try to get the logged-in user from Win32_ComputerSystem
-        $computerSystem = Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue
+        # Try to get the logged-in user from Win32_ComputerSystem with timeout
+        $computerSystem = $null
+        $job = Start-Job { Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue }
+        $jobResult = $job | Wait-Job -Timeout 2
+        if ($jobResult) {
+            $computerSystem = Receive-Job -Job $job
+            Remove-Job -Job $job
+        } else {
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            Remove-Job -Job $job -ErrorAction SilentlyContinue
+        }
+        
         if ($computerSystem -and $computerSystem.UserName) {
             $userName = $computerSystem.UserName
             # Extract just the username if it's in DOMAIN\USER format
@@ -224,10 +234,34 @@ function Fetch-Versions {
     
     try {
         $startTime = Get-Date
-        $response = Invoke-WebRequest -Uri $script:VersionsUrl -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
+        
+        # Use Start-Job to ensure timeout works correctly
+        $job = Start-Job {
+            param($url, $timeout)
+            try {
+                Invoke-WebRequest -Uri $url -TimeoutSec $timeout -UseBasicParsing -ErrorAction Stop
+            } catch {
+                return $null
+            }
+        } -ArgumentList $script:VersionsUrl, $TimeoutSeconds
+        
+        $jobResult = $job | Wait-Job -Timeout $TimeoutSeconds
+        $response = $null
+        
+        if ($jobResult) {
+            $response = Receive-Job -Job $job
+            Remove-Job -Job $job
+        } else {
+            # Timeout - stop the job
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            Remove-Job -Job $job -ErrorAction SilentlyContinue
+            Write-Warn "Version fetch timed out after ${TimeoutSeconds}s"
+            return $false
+        }
+        
         $elapsed = (Get-Date - $startTime).TotalSeconds
         
-        if ($response.StatusCode -eq 200 -and $response.Content) {
+        if ($response -and $response.StatusCode -eq 200 -and $response.Content) {
             $content = $response.Content
             $lines = $content -split "`r?`n"
             
@@ -253,7 +287,7 @@ function Fetch-Versions {
                 Write-Warn "No versions found in response"
             }
         } else {
-            Write-Warn "Invalid response from server (Status: $($response.StatusCode))"
+            Write-Warn "Invalid response from server"
         }
         return $false
     }
@@ -338,12 +372,17 @@ $SetupCmdName = "nacos-setup.cmd"
 
 # Initialize versions using the unified version manager
 function Initialize-Versions {
-    # Load all versions with timeout (increased to 5 seconds for reliability)
+    # Load all versions with short timeout for iex compatibility
+    Write-Info "Initializing versions..."
     try {
-        Get-AllVersions -TimeoutSeconds 5
+        Get-AllVersions -TimeoutSeconds 3
     } catch {
         Write-Warn "Version fetch failed: $($_.Exception.Message)"
         Write-Warn "Using fallback versions"
+        # Ensure we have valid fallback versions
+        $script:NacosCliVersion = $script:FallbackNacosCliVersion
+        $script:NacosSetupVersion = $script:FallbackNacosSetupVersion
+        $script:NacosServerVersion = $script:FallbackNacosServerVersion
     }
 
     # Apply user-specified versions if provided

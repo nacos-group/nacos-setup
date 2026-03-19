@@ -1,14 +1,24 @@
 ﻿# Nacos Setup Installer for Windows (PowerShell)
 # Installs nacos-setup (default) or nacos-cli (with -cli flag)
+# Optimized for iwr ... | iex execution
 
 # NEVER exit on errors - always continue and report
 $ErrorActionPreference = "Continue"
 $WarningPreference = "Continue"
 $VerbosePreference = "Continue"
 
-# Save original progress preference and restore it for user experience
-$originalProgressPreference = $ProgressPreference
-$ProgressPreference = "Continue"
+# Progress preference: use SilentlyContinue in pipeline mode to prevent hanging
+if ([Console]::IsInputRedirected -or $Host.Name -eq 'Windows PowerShell ISE Host') {
+    $ProgressPreference = "SilentlyContinue"
+} else {
+    $ProgressPreference = "Continue"
+}
+
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  Nacos Installer (Windows)" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "[INFO] Script starting..." -ForegroundColor Cyan
 
 # =============================
 # Helpers (Define early for use in initialization)
@@ -417,11 +427,6 @@ function Initialize-Versions {
 # =============================
 # Main
 # =============================
-Write-Host ""
-Write-Host "========================================"
-Write-Host "  Nacos Installer (Windows)"
-Write-Host "========================================"
-Write-Host ""
 
 # Initialize versions
 Initialize-Versions

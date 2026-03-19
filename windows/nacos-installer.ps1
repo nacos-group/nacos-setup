@@ -206,14 +206,14 @@ $script:CachedServerVersion = ""
 $script:VersionsFetched = $false
 
 function Fetch-Versions {
-    param([int]$TimeoutSeconds = 5)
+    param([int]$TimeoutSeconds = 3)
     
     try {
-        # Use Invoke-RestMethod for simpler content handling (like curl in bash script)
-        $response = Invoke-RestMethod -Uri $script:VersionsUrl -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
+        # Use Invoke-WebRequest with explicit timeout (more reliable than Invoke-RestMethod)
+        $response = Invoke-WebRequest -Uri $script:VersionsUrl -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
         
-        if ($response) {
-            $content = $response
+        if ($response.StatusCode -eq 200 -and $response.Content) {
+            $content = $response.Content
             $lines = $content -split "`r?`n"
             foreach ($line in $lines) {
                 $line = $line.Trim()
@@ -225,6 +225,7 @@ function Fetch-Versions {
             # Only mark as fetched if we got at least one version
             if ($script:CachedCliVersion -or $script:CachedSetupVersion -or $script:CachedServerVersion) {
                 $script:VersionsFetched = $true
+                Write-Info "Remote versions fetched successfully"
                 return $true
             }
         }
@@ -266,32 +267,34 @@ function Get-Version {
 }
 
 function Get-AllVersions {
-    param([int]$TimeoutSeconds = 5)
+    param([int]$TimeoutSeconds = 2)
     
-    Write-Info "Attempting to fetch versions from: $script:VersionsUrl"
+    Write-Info "Fetching versions (timeout: ${TimeoutSeconds}s)..."
     
-    # Get versions and store in script scope
-    $cliVer = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
-    $setupVer = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
-    $serverVer = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
-    
-    # Set script-level variables
-    $script:NacosCliVersion = if ($cliVer) { $cliVer } else { $script:FallbackNacosCliVersion }
-    $script:NacosSetupVersion = if ($setupVer) { $setupVer } else { $script:FallbackNacosSetupVersion }
-    $script:NacosServerVersion = if ($serverVer) { $serverVer } else { $script:FallbackNacosServerVersion }
-    
-    # Log which versions were actually used
-    if ($script:VersionsFetched) {
-        Write-Info "鉁?Remote versions fetched successfully"
-        Write-Info "  CLI: $($script:NacosCliVersion)"
-        Write-Info "  Setup: $($script:NacosSetupVersion)"
-        Write-Info "  Server: $($script:NacosServerVersion)"
-    } else {
-        Write-Warn "鉁?Could not fetch remote versions (network unavailable or file not found)"
-        Write-Warn "  Using fallback versions instead"
-        Write-Info "  CLI: $($script:NacosCliVersion)"
-        Write-Info "  Setup: $($script:NacosSetupVersion)"
-        Write-Info "  Server: $($script:NacosServerVersion)"
+    try {
+        # Get versions with short timeout
+        $cliVer = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
+        $setupVer = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
+        $serverVer = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
+        
+        # Set script-level variables
+        $script:NacosCliVersion = if ($cliVer) { $cliVer } else { $script:FallbackNacosCliVersion }
+        $script:NacosSetupVersion = if ($setupVer) { $setupVer } else { $script:FallbackNacosSetupVersion }
+        $script:NacosServerVersion = if ($serverVer) { $serverVer } else { $script:FallbackNacosServerVersion }
+        
+        # Log result
+        if ($script:VersionsFetched) {
+            Write-Info "✓ Remote versions fetched"
+        } else {
+            Write-Warn "⚠ Using fallback versions"
+        }
+        Write-Info "CLI: $($script:NacosCliVersion) | Setup: $($script:NacosSetupVersion) | Server: $($script:NacosServerVersion)"
+    }
+    catch {
+        Write-Warn "⚠ Version fetch error, using fallback"
+        $script:NacosCliVersion = $script:FallbackNacosCliVersion
+        $script:NacosSetupVersion = $script:FallbackNacosSetupVersion
+        $script:NacosServerVersion = $script:FallbackNacosServerVersion
     }
 }
 

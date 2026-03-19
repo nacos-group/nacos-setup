@@ -590,7 +590,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${SetupInstallDir}\$SetupSc
 }
 
 # Pause to allow user to see the results before window closes (only in interactive mode)
-if ($Host.Name -eq 'ConsoleHost' -and -not $env:CI -and -not $env:TF_BUILD) {
+# Skip if running via iex (Invoke-Expression) or pipeline
+$isPipeline = [Console]::IsInputRedirected -or ($Host.Name -eq 'Windows PowerShell ISE Host') -or -not $Host.UI.RawUI.KeyAvailable
+if ($Host.Name -eq 'ConsoleHost' -and -not $env:CI -and -not $env:TF_BUILD -and -not $isPipeline) {
     Write-Host ""
     Write-Host "Press any key to exit..." -ForegroundColor Yellow
     try {

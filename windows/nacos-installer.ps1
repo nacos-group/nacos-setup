@@ -61,6 +61,7 @@ function Download-File($url, $output) {
         } catch {}
         
         if ($useCurl) {
+            Write-Info "Using curl for download (connect-timeout: 30s, max-time: 300s)..."
             # Use curl with 30s connect timeout and 300s max time
             $curlArgs = @(
                 "-L",                           # Follow redirects
@@ -75,6 +76,7 @@ function Download-File($url, $output) {
                 throw "curl failed with exit code $LASTEXITCODE"
             }
         } else {
+            Write-Info "curl not available, using Invoke-WebRequest for download..."
             # Fallback to Invoke-WebRequest
             $headers = @{
                 "Referer" = $referer
@@ -266,6 +268,7 @@ function Fetch-Versions {
         } catch {}
         
         if ($useCurl) {
+            Write-Info "Using curl to fetch versions (connect-timeout: ${TimeoutSeconds}s, max-time: $($TimeoutSeconds + 2)s)..."
             # Use curl with specified timeout
             $curlArgs = @(
                 "-s",                           # Silent mode
@@ -279,6 +282,7 @@ function Fetch-Versions {
                 throw "curl failed with exit code $LASTEXITCODE"
             }
         } else {
+            Write-Info "curl not available, using Invoke-WebRequest to fetch versions (timeout: ${TimeoutSeconds}s)..."
             # Fallback to Invoke-WebRequest
             $response = Invoke-WebRequest -Uri $script:VersionsUrl -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
             if ($response -and $response.Content) {

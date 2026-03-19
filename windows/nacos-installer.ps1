@@ -48,17 +48,44 @@ function Download-File($url, $output) {
     Write-Info "Downloading from: $url"
     
     # Set Referer header to match bash script behavior (required by Aliyun OSS CDN)
-    $headers = @{
-        "Referer" = "https://nacos.io/download/nacos-server/?spm=nacos_install"
-    }
+    $referer = "https://nacos.io/download/nacos-server/?spm=nacos_install"
     
     try {
         $startTime = Get-Date
-        if ($PSVersionTable.PSVersion.Major -lt 6) {
-            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers
+        
+        # Prefer curl for better timeout control, fallback to Invoke-WebRequest
+        $useCurl = $false
+        try {
+            $curlVersion = curl --version 2>$null
+            if ($curlVersion) { $useCurl = $true }
+        } catch {}
+        
+        if ($useCurl) {
+            # Use curl with 30s connect timeout and 300s max time
+            $curlArgs = @(
+                "-L",                           # Follow redirects
+                "-o", $output,                  # Output file
+                "--connect-timeout", "30",      # Connect timeout
+                "--max-time", "300",            # Total max time
+                "-H", "Referer: $referer",      # Referer header
+                $url
+            )
+            & curl @curlArgs 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "curl failed with exit code $LASTEXITCODE"
+            }
         } else {
-            Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers
+            # Fallback to Invoke-WebRequest
+            $headers = @{
+                "Referer" = $referer
+            }
+            if ($PSVersionTable.PSVersion.Major -lt 6) {
+                Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers
+            } else {
+                Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers
+            }
         }
+        
         $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds, 2)
         if (Test-Path $output) {
             $size = (Get-Item $output).Length
@@ -229,19 +256,43 @@ function Fetch-Versions {
     
     try {
         $startTime = Get-Date
+        $content = $null
         
-        # Direct synchronous request (more reliable in pipeline mode)
-        $response = Invoke-WebRequest -Uri $script:VersionsUrl -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
+        # Prefer curl for better timeout control
+        $useCurl = $false
+        try {
+            $curlVersion = curl --version 2>$null
+            if ($curlVersion) { $useCurl = $true }
+        } catch {}
+        
+        if ($useCurl) {
+            # Use curl with specified timeout
+            $curlArgs = @(
+                "-s",                           # Silent mode
+                "-L",                           # Follow redirects
+                "--connect-timeout", $TimeoutSeconds,
+                "--max-time", ($TimeoutSeconds + 2),
+                $script:VersionsUrl
+            )
+            $content = & curl @curlArgs 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                throw "curl failed with exit code $LASTEXITCODE"
+            }
+        } else {
+            # Fallback to Invoke-WebRequest
+            $response = Invoke-WebRequest -Uri $script:VersionsUrl -TimeoutSec $TimeoutSeconds -UseBasicParsing -ErrorAction Stop
+            if ($response -and $response.Content) {
+                $content = if ($response.Content -is [byte[]]) {
+                    [System.Text.Encoding]::UTF8.GetString($response.Content)
+                } else {
+                    $response.Content
+                }
+            }
+        }
         
         $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds, 2)
         
-        if ($response -and $response.StatusCode -eq 200 -and $response.Content) {
-            # Ensure content is treated as string
-            $content = if ($response.Content -is [byte[]]) {
-                [System.Text.Encoding]::UTF8.GetString($response.Content)
-            } else {
-                $response.Content
-            }
+        if ($content) {
             $lines = $content -split "`r?`n"
             
             foreach ($line in $lines) {

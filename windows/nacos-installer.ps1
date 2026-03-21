@@ -73,9 +73,10 @@ function Remove-DirectorySafe($path) {
 # Version Management
 # =============================
 # 默认版本号（远端获取失败时使用）
-$DefaultNacosCliVersion    = "0.0.2"
-$DefaultNacosSetupVersion  = "0.0.1"
-$DefaultNacosServerVersion = "3.2.0"
+# Keep these fallbacks aligned with the repository-level `versions` file.
+$DefaultNacosCliVersion    = "0.0.11"
+$DefaultNacosSetupVersion  = "0.0.5"
+$DefaultNacosServerVersion = "3.2.0-BETA"
 
 $Global:NacosCliVersion    = $DefaultNacosCliVersion
 $Global:NacosSetupVersion  = $DefaultNacosSetupVersion

@@ -55,5 +55,12 @@ else
     test_fail "Bug Fix: Port detection missing Python fallback"
 fi
 
+# Bug 8: 检查 beta 版本比较兼容性
+if bash -lc "source \"$LIB_DIR/common.sh\" && version_ge '3.2.0-BETA' '3.2.0'" >/dev/null 2>/dev/null; then
+    test_pass "Bug Fix: version_ge handles prerelease suffixes"
+else
+    test_fail "Bug Fix: version_ge fails on prerelease suffixes"
+fi
+
 echo ""
 test_summary

@@ -309,7 +309,7 @@ db_conf_show() {
 
     print_info "File: $config_file"
     echo ""
-    cat "$config_file"
+    sed -E 's/^(db\.password\.([0-9]+)=).*/\1******/' "$config_file"
     echo ""
     return 0
 }

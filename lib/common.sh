@@ -45,10 +45,15 @@ print_error() {
 version_ge() {
     local v1=$1
     local v2=$2
+    local clean_v1 clean_v2
+
+    # Strip non-numeric suffixes like -BETA so prerelease versions remain comparable.
+    clean_v1=$(echo "$v1" | sed 's/[^0-9.].*$//')
+    clean_v2=$(echo "$v2" | sed 's/[^0-9.].*$//')
     
     # Split versions into arrays
-    IFS='.' read -ra V1 <<< "$v1"
-    IFS='.' read -ra V2 <<< "$v2"
+    IFS='.' read -ra V1 <<< "${clean_v1:-0}"
+    IFS='.' read -ra V2 <<< "${clean_v2:-0}"
     
     # Compare each component
     for i in 0 1 2; do

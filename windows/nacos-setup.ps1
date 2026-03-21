@@ -77,6 +77,7 @@ if ($realUserProfile -match 'systemprofile|system32') {
 }
 
 # Ensure cache dir uses real user profile before loading libs
+$env:REAL_USER_PROFILE = $realUserProfile
 $env:NACOS_CACHE_DIR = Join-Path $realUserProfile ".nacos\cache"
 
 # =============================
@@ -325,17 +326,50 @@ function Parse-Arguments($argv) {
     for ($i=0; $i -lt $argsList.Count; $i++) {
         $a = $argsList[$i]
         switch ($a) {
-            "-v" { $Global:Version = $argsList[$i+1]; $script:UserSpecifiedVersion = $true; $i++ }
-            "--version" { $Global:Version = $argsList[$i+1]; $script:UserSpecifiedVersion = $true; $i++ }
-            "-p" { $Global:Port = [int]$argsList[$i+1]; $Global:BasePort = $Global:Port; $i++ }
-            "--port" { $Global:Port = [int]$argsList[$i+1]; $Global:BasePort = $Global:Port; $i++ }
-            "-d" { $Global:InstallDir = $argsList[$i+1]; $i++ }
-            "--dir" { $Global:InstallDir = $argsList[$i+1]; $i++ }
-            "-c" { $Global:Mode = "cluster"; $Global:ClusterId = $argsList[$i+1]; $i++ }
-            "--cluster" { $Global:Mode = "cluster"; $Global:ClusterId = $argsList[$i+1]; $i++ }
-            "-n" { $Global:ReplicaCount = [int]$argsList[$i+1]; $i++ }
-            "--nodes" { $Global:ReplicaCount = [int]$argsList[$i+1]; $i++ }
-            "--leave" { $Global:LeaveMode = $true; $Global:NodeIndex = $argsList[$i+1]; $i++ }
+            "-v" {
+                if ($i + 1 -ge $argsList.Count -or $argsList[$i + 1] -match "^-") { Write-ErrorMsg "Option -v/--version requires a version number"; exit 1 }
+                $Global:Version = $argsList[$i+1]; $script:UserSpecifiedVersion = $true; $i++
+            }
+            "--version" {
+                if ($i + 1 -ge $argsList.Count -or $argsList[$i + 1] -match "^-") { Write-ErrorMsg "Option -v/--version requires a version number"; exit 1 }
+                $Global:Version = $argsList[$i+1]; $script:UserSpecifiedVersion = $true; $i++
+            }
+            "-p" {
+                if ($i + 1 -ge $argsList.Count -or $argsList[$i + 1] -match "^-") { Write-ErrorMsg "Option -p/--port requires a port number"; exit 1 }
+                $Global:Port = [int]$argsList[$i+1]; $Global:BasePort = $Global:Port; $i++
+            }
+            "--port" {
+                if ($i + 1 -ge $argsList.Count -or $argsList[$i + 1] -match "^-") { Write-ErrorMsg "Option -p/--port requires a port number"; exit 1 }
+                $Global:Port = [int]$argsList[$i+1]; $Global:BasePort = $Global:Port; $i++
+            }
+            "-d" {
+                if ($i + 1 -ge $argsList.Count -or $argsList[$i + 1] -match "^-") { Write-ErrorMsg "Option -d/--dir requires a directory path"; exit 1 }
+                $Global:InstallDir = $argsList[$i+1]; $i++
+            }
+            "--dir" {
+                if ($i + 1 -ge $argsList.Count -or $argsList[$i + 1] -match "^-") { Write-ErrorMsg "Option -d/--dir requires a directory path"; exit 1 }
+                $Global:InstallDir = $argsList[$i+1]; $i++
+            }
+            "-c" {
+                if ($i + 1 -ge $argsList.Count -or $argsList[$i + 1] -match "^-") { Write-ErrorMsg "Option -c/--cluster requires a cluster ID"; exit 1 }
+                $Global:Mode = "cluster"; $Global:ClusterId = $argsList[$i+1]; $i++
+            }
+            "--cluster" {
+                if ($i + 1 -ge $argsList.Count -or $argsList[$i + 1] -match "^-") { Write-ErrorMsg "Option -c/--cluster requires a cluster ID"; exit 1 }
+                $Global:Mode = "cluster"; $Global:ClusterId = $argsList[$i+1]; $i++
+            }
+            "-n" {
+                if ($i + 1 -ge $argsList.Count -or $argsList[$i + 1] -match "^-") { Write-ErrorMsg "Option -n/--nodes requires a node count"; exit 1 }
+                $Global:ReplicaCount = [int]$argsList[$i+1]; $i++
+            }
+            "--nodes" {
+                if ($i + 1 -ge $argsList.Count -or $argsList[$i + 1] -match "^-") { Write-ErrorMsg "Option -n/--nodes requires a node count"; exit 1 }
+                $Global:ReplicaCount = [int]$argsList[$i+1]; $i++
+            }
+            "--leave" {
+                if ($i + 1 -ge $argsList.Count -or $argsList[$i + 1] -match "^-") { Write-ErrorMsg "Option --leave requires a node index"; exit 1 }
+                $Global:LeaveMode = $true; $Global:NodeIndex = $argsList[$i+1]; $i++
+            }
             "-h" { Print-Usage; exit 0 }
             "--help" { Print-Usage; exit 0 }
             default { Write-ErrorMsg "Unknown option: $a"; exit 1 }
@@ -353,6 +387,10 @@ function Validate-Arguments {
             Write-ErrorMsg "Cluster ID is required"
             exit 1
         }
+    }
+    if (($Global:JoinMode -or $Global:CleanMode -or $Global:LeaveMode) -and -not $Global:ClusterId) {
+        Write-ErrorMsg "Cluster options (--join/--clean/--leave) require -c/--cluster"
+        exit 1
     }
 }
 
@@ -662,7 +700,7 @@ try {
                 $env:USE_EXTERNAL_DATASOURCE = "true"
                 if ($Global:DbConfFile -and $Global:DbConfFile -ne "default") {
                     # Resolve config name to full path
-                    $userProfile = if ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) { $env:HOME } else { "." }
+                    $userProfile = if ($env:REAL_USER_PROFILE) { $env:REAL_USER_PROFILE } elseif ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) { $env:HOME } else { "." }
                     $env:DEFAULT_DATASOURCE_CONFIG = Join-Path $userProfile "ai-infra\nacos\$($Global:DbConfFile).properties"
                 }
                 # Continue to normal installation flow (will init version below)
@@ -676,7 +714,8 @@ try {
 
     # Print external datasource mode info if enabled
     if ($env:USE_EXTERNAL_DATASOURCE -eq "true") {
-        Write-Info "External datasource mode enabled: $Global:DefaultDatasourceConfig"
+        $activeDatasourceConfig = if ($env:DEFAULT_DATASOURCE_CONFIG) { $env:DEFAULT_DATASOURCE_CONFIG } else { $Global:DefaultDatasourceConfig }
+        Write-Info "External datasource mode enabled: $activeDatasourceConfig"
     }
 
     Validate-Arguments

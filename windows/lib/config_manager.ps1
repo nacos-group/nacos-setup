@@ -2,7 +2,15 @@
 . $PSScriptRoot\common.ps1
 
 # Cross-platform user profile detection
-$userProfile = if ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) { $env:HOME } else { "." }
+$userProfile = if ($env:REAL_USER_PROFILE) {
+    $env:REAL_USER_PROFILE
+} elseif ($env:USERPROFILE) {
+    $env:USERPROFILE
+} elseif ($env:HOME) {
+    $env:HOME
+} else {
+    "."
+}
 $Global:DefaultDatasourceConfig = Join-Path $userProfile "ai-infra\nacos\default.properties"
 
 function Load-DefaultDatasourceConfig {
@@ -157,7 +165,15 @@ function Resolve-ConfigPath($configName) {
     if ($configName -eq "default" -or -not $configName) {
         return $Global:DefaultDatasourceConfig
     }
-    $userProfile = if ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) { $env:HOME } else { "." }
+    $userProfile = if ($env:REAL_USER_PROFILE) {
+        $env:REAL_USER_PROFILE
+    } elseif ($env:USERPROFILE) {
+        $env:USERPROFILE
+    } elseif ($env:HOME) {
+        $env:HOME
+    } else {
+        "."
+    }
     return Join-Path $userProfile "ai-infra\nacos\${configName}.properties"
 }
 
@@ -251,6 +267,12 @@ function Show-DatasourceConfig($configName = $null) {
 
     Write-Info "File: $targetFile"
     Write-Host ""
-    Get-Content -Path $targetFile | ForEach-Object { Write-Host $_ }
+    Get-Content -Path $targetFile | ForEach-Object {
+        if ($_ -match '^db\.password\.[0-9]+=') {
+            Write-Host ($_ -replace '^(db\.password\.[0-9]+=).*$', '$1******')
+        } else {
+            Write-Host $_
+        }
+    }
     Write-Host ""
 }

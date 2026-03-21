@@ -423,6 +423,15 @@ validate_arguments() {
             exit 1
         fi
     fi
+
+    if [ "$JOIN_MODE" = true ] || [ "$CLEAN_MODE" = true ] || [ "$LEAVE_MODE" = true ]; then
+        if [ -z "$CLUSTER_ID" ]; then
+            print_error "Cluster options (--join/--clean/--leave) require -c/--cluster"
+            echo ""
+            print_info "Usage: bash nacos-setup.sh -c <cluster-id> [--join|--clean|--leave <index>]"
+            exit 1
+        fi
+    fi
 }
 
 # ============================================================================

@@ -62,4 +62,24 @@ else
 fi
 
 echo ""
+test_info "Testing db-conf show masking"
+
+mask_file="/tmp/test_mask_db_conf.properties"
+cat > "$mask_file" << 'EOF'
+db.user.0=root
+db.password.0=super-secret
+EOF
+
+output=$(DEFAULT_DATASOURCE_CONFIG="$mask_file" bash "$TEST_DIR/nacos-setup.sh" db-conf show default 2>&1)
+if echo "$output" | grep -Fq "db.password.0=super-secret"; then
+    test_fail "db-conf show should mask datasource password"
+elif echo "$output" | grep -Fq "db.password.0=******"; then
+    test_pass "db-conf show masks datasource password"
+else
+    test_fail "db-conf show mask output missing"
+fi
+
+rm -f "$mask_file"
+
+echo ""
 test_summary

@@ -29,6 +29,14 @@ if [ -f "$TEST_DIR/nacos-setup.sh" ]; then
     else
         test_fail "Missing cluster ID detection"
     fi
+
+    # 测试集群专用参数必须配合 -c 使用
+    output=$(bash "$TEST_DIR/nacos-setup.sh" --leave 1 --no-start 2>&1)
+    if echo "$output" | grep -qi "Cluster options.*require -c\|requires.*cluster"; then
+        test_pass "Cluster-only flags require cluster ID"
+    else
+        test_fail "Cluster-only flags should require cluster ID"
+    fi
 else
     test_fail "nacos-setup.sh not found"
 fi

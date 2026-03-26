@@ -16,6 +16,24 @@ _SKILL_SCANNER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Always write to stderr (no ANSI); survives logging pipelines and makes sudo/root issues obvious.
 _skill_scanner_trace() { printf '%s\n' "[nacos-setup/skill-scanner] $*" >&2; }
 
+# Configure skill-scanner plugin properties in application.properties
+# Parameters: config_file
+configure_skill_scanner_properties() {
+    local config_file="$1"
+    
+    if [ -z "$config_file" ] || [ ! -f "$config_file" ]; then
+        _skill_scanner_trace "skip: application.properties not found (config_file=${config_file:-unset})"
+        return 1
+    fi
+    
+    _skill_scanner_trace "configuring skill-scanner plugin properties in ${config_file}"
+    
+    update_config_property "$config_file" "nacos.plugin.skill-scanner.enabled" "true"
+    update_config_property "$config_file" "nacos.plugin.skill-scanner.type" "nacos"
+    
+    _skill_scanner_trace "skill-scanner plugin properties configured successfully"
+}
+
 # Entry from standalone.sh / cluster.sh after application.properties is written.
 run_post_nacos_config_skill_scanner_hook() {
     _skill_scanner_trace "hook invoked (VERSION=${VERSION:-unset}, lib_dir=${_SKILL_SCANNER_LIB_DIR})"

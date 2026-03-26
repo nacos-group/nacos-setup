@@ -885,7 +885,14 @@ main() {
     fi
     
     # Check requirements
-    if ! check_requirements "${only_cli:+onlycli}"; then
+    # If only installing CLI, only check bin directory
+    # Otherwise check full installation requirements
+    local check_mode="full"
+    if [[ "$only_cli" == true ]]; then
+        check_mode="onlycli"
+    fi
+    
+    if ! check_requirements "$check_mode"; then
         print_error "Requirements check failed"
         print_info "Try running with sudo: curl -fsSL https://nacos.io/installer.sh | sudo bash"
         exit 1

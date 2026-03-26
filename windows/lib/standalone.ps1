@@ -22,6 +22,7 @@ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$scriptPath\config_manager.ps1"
 . "$scriptPath\java_manager.ps1"
 . "$scriptPath\process_manager.ps1"
+. "$scriptPath\data_import.ps1"
 
 # ============================================================================
 # Global Variables for Standalone Mode
@@ -162,6 +163,10 @@ function Invoke-StandaloneMode {
     
     Remove-Item "$configFile.bak" -ErrorAction SilentlyContinue
     Write-Info "Configuration completed"
+    Write-Host ""
+
+    Write-Info "Post-config: importing default agentspec / skill data into $($Global:InstallDir)\data..."
+    Invoke-PostNacosConfigDataImportHook $Global:InstallDir
     Write-Host ""
     
     # Start Nacos if auto-start is enabled

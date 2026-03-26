@@ -83,6 +83,17 @@ else
     test_fail "cluster.sh not found"
 fi
 
+# 测试 7b: 检查集群模式默认 agentspec / skill 数据导入
+if [ -f "$LIB_DIR/cluster.sh" ]; then
+    if grep -q "run_post_nacos_config_data_import_hook" "$LIB_DIR/cluster.sh"; then
+        test_pass "Cluster mode invokes default data import hook"
+    else
+        test_fail "Cluster mode should call run_post_nacos_config_data_import_hook"
+    fi
+else
+    test_fail "cluster.sh not found"
+fi
+
 # 测试 8: 检查集群模式 daemon 支持
 if [ -f "$LIB_DIR/cluster.sh" ]; then
     if grep -q "DAEMON_MODE" "$LIB_DIR/cluster.sh"; then

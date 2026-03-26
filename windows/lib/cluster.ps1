@@ -22,6 +22,7 @@ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$scriptPath\config_manager.ps1"
 . "$scriptPath\java_manager.ps1"
 . "$scriptPath\process_manager.ps1"
+. "$scriptPath\data_import.ps1"
 
 # ============================================================================
 # Global Variables
@@ -276,6 +277,8 @@ function New-Cluster {
         }
         
         Remove-Item "$configFile.bak" -ErrorAction SilentlyContinue
+        Write-Info "  Importing default agentspec / skill data into $nodeDir\data..."
+        Invoke-PostNacosConfigDataImportHook $nodeDir
         
         $nacosMajor = $Global:Version.Split('.')[0]
         if ($nacosMajor -ge 3) {
@@ -603,6 +606,10 @@ function Join-ClusterMode {
     
     Remove-Item "$configFile.bak" -ErrorAction SilentlyContinue
     Write-Info "Node configured: main=$newMainPort, console=$newConsolePort"
+    Write-Host ""
+
+    Write-Info "Post-config: importing default agentspec / skill data into $newNodeDir\data..."
+    Invoke-PostNacosConfigDataImportHook $newNodeDir
     Write-Host ""
     
     # Update cluster.conf in existing nodes

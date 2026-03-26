@@ -154,15 +154,28 @@ resolve_java_home_from_cmd() {
         return 1
     fi
 
-    # Try to resolve symlink for a stable JAVA_HOME
+    # Resolve symlink chain for a stable JAVA_HOME
     if command -v readlink >/dev/null 2>&1; then
-        local resolved
-        resolved=$(readlink "$java_path" 2>/dev/null || true)
-        if [ -n "$resolved" ]; then
-            if [[ "$resolved" = /* ]]; then
-                java_path="$resolved"
-            else
-                java_path="$(cd "$(dirname "$java_path")" && cd "$(dirname "$resolved")" && pwd)/$(basename "$resolved")"
+        local resolved_f=""
+        resolved_f=$(readlink -f "$java_path" 2>/dev/null || true)
+        if [ -n "$resolved_f" ] && [ -x "$resolved_f" ]; then
+            java_path="$resolved_f"
+        else
+            local link="$java_path"
+            local i=0
+            while [ $i -lt 10 ]; do
+                local next
+                next=$(readlink "$link" 2>/dev/null || true)
+                [ -n "$next" ] || break
+                if [[ "$next" = /* ]]; then
+                    link="$next"
+                else
+                    link="$(cd "$(dirname "$link")" && cd "$(dirname "$next")" && pwd)/$(basename "$next")"
+                fi
+                i=$((i + 1))
+            done
+            if [ -x "$link" ]; then
+                java_path="$link"
             fi
         fi
     fi

@@ -133,6 +133,46 @@ search_java_installation() {
 # Java Environment Setup
 # ============================================================================
 
+# Resolve JAVA_HOME from a java command path.
+# Parameters: java_cmd
+# Returns: resolved JAVA_HOME path or empty
+resolve_java_home_from_cmd() {
+    local java_cmd=$1
+    local java_path=""
+
+    if [ -z "$java_cmd" ]; then
+        return 1
+    fi
+
+    if [[ "$java_cmd" = /* ]]; then
+        java_path="$java_cmd"
+    else
+        java_path=$(command -v "$java_cmd" 2>/dev/null || true)
+    fi
+
+    if [ -z "$java_path" ]; then
+        return 1
+    fi
+
+    # Try to resolve symlink for a stable JAVA_HOME
+    if command -v readlink >/dev/null 2>&1; then
+        local resolved
+        resolved=$(readlink "$java_path" 2>/dev/null || true)
+        if [ -n "$resolved" ]; then
+            if [[ "$resolved" = /* ]]; then
+                java_path="$resolved"
+            else
+                java_path="$(cd "$(dirname "$java_path")" && cd "$(dirname "$resolved")" && pwd)/$(basename "$resolved")"
+            fi
+        fi
+    fi
+
+    local java_home
+    java_home="$(dirname "$(dirname "$java_path")")"
+    [ -d "$java_home" ] || return 1
+    printf '%s\n' "$java_home"
+}
+
 # Check and setup Java environment
 # Parameters: nacos_version, advanced_mode
 # Returns: 0 on success, 1 on failure
@@ -178,6 +218,15 @@ check_java_requirements() {
             JAVA_CMD=""
         fi
     fi
+
+    # Ensure JAVA_HOME always matches selected JAVA_CMD (including PATH-discovered java).
+    if [ -n "$JAVA_CMD" ]; then
+        local resolved_java_home
+        resolved_java_home=$(resolve_java_home_from_cmd "$JAVA_CMD" || true)
+        if [ -n "$resolved_java_home" ] && [ -x "$resolved_java_home/bin/java" ]; then
+            export JAVA_HOME="$resolved_java_home"
+        fi
+    fi
     
     # If no suitable Java found, search system
     if [ -z "$JAVA_CMD" ]; then
@@ -221,6 +270,9 @@ check_java_requirements() {
     fi
     
     print_info "Java version: $JAVA_VERSION - OK"
+    if [ -n "${JAVA_HOME:-}" ]; then
+        print_info "Using JAVA_HOME: $JAVA_HOME"
+    fi
     return 0
 }
 

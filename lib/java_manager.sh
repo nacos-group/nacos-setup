@@ -283,9 +283,6 @@ check_java_requirements() {
     fi
     
     print_info "Java version: $JAVA_VERSION - OK"
-    if [ -n "${JAVA_HOME:-}" ]; then
-        print_info "Using JAVA_HOME: $JAVA_HOME"
-    fi
     return 0
 }
 

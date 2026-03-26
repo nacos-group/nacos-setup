@@ -142,22 +142,6 @@ start_nacos_process() {
         export PATH="${JAVA_HOME}/bin:${PATH}"
     fi
 
-    # Java diagnostics for troubleshooting unexpected runtime version.
-    local path_java
-    path_java=$(command -v java 2>/dev/null || true)
-    local path_java_ver="unknown"
-    if [ -n "$path_java" ]; then
-        path_java_ver=$(get_java_version "$path_java")
-    fi
-    local java_home_ver="unknown"
-    if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/java" ]; then
-        java_home_ver=$(get_java_version "${JAVA_HOME}/bin/java")
-    fi
-    print_info "Java startup diagnostics:" >&2
-    print_info "  JAVA_HOME=${JAVA_HOME:-<unset>}" >&2
-    print_info "  JAVA_HOME/bin/java version=${java_home_ver}" >&2
-    print_info "  PATH java=${path_java:-<not-found>}" >&2
-    print_info "  PATH java version=${path_java_ver}" >&2
     # Start Nacos
     if [ "$use_derby" = true ] && [ "$mode" = "cluster" ]; then
         bash "$install_dir/bin/startup.sh" -m "$mode" -p embedded >/dev/null 2>&1
@@ -178,16 +162,6 @@ start_nacos_process() {
         pid=$(ps aux | grep "java" | grep "$install_dir" | grep -v grep | awk '{print $2}' | head -1)
         
         if [ -n "$pid" ] && ps -p $pid >/dev/null 2>&1; then
-            # Post-start runtime Java diagnostics (Linux only for /proc/<pid>/exe).
-            if [ -e "/proc/${pid}/exe" ] && command -v readlink >/dev/null 2>&1; then
-                local runtime_java
-                runtime_java=$(readlink "/proc/${pid}/exe" 2>/dev/null || true)
-                if [ -n "$runtime_java" ]; then
-                    local runtime_ver
-                    runtime_ver=$(get_java_version "$runtime_java")
-                    print_info "  Runtime java=${runtime_java} (version=${runtime_ver})" >&2
-                fi
-            fi
             echo "$pid"
             return 0
         fi

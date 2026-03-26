@@ -318,8 +318,8 @@ create_cluster() {
     echo "[nacos-setup/skill-scanner] cluster: post-config reached (VERSION=${VERSION})" >&2
     if declare -F run_post_nacos_config_skill_scanner_hook >/dev/null 2>&1; then
         run_post_nacos_config_skill_scanner_hook
-        # Configure skill-scanner plugin properties for all cluster nodes
-        if declare -F configure_skill_scanner_properties >/dev/null 2>&1; then
+        # Configure skill-scanner plugin properties only if skill-scanner is available
+        if command -v skill-scanner >/dev/null 2>&1 && declare -F configure_skill_scanner_properties >/dev/null 2>&1; then
             for ((i=0; i<REPLICA_COUNT; i++)); do
                 local node_name="${i}-v${VERSION}"
                 local node_config_file="$cluster_dir/$node_name/conf/application.properties"
@@ -694,8 +694,8 @@ join_cluster() {
     echo "[nacos-setup/skill-scanner] cluster join: post-config reached (VERSION=${VERSION})" >&2
     if declare -F run_post_nacos_config_skill_scanner_hook >/dev/null 2>&1; then
         run_post_nacos_config_skill_scanner_hook
-        # Configure skill-scanner plugin properties for the new node
-        if declare -F configure_skill_scanner_properties >/dev/null 2>&1; then
+        # Configure skill-scanner plugin properties only if skill-scanner is available
+        if command -v skill-scanner >/dev/null 2>&1 && declare -F configure_skill_scanner_properties >/dev/null 2>&1; then
             configure_skill_scanner_properties "$config_file"
         fi
     else

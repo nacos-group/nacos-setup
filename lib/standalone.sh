@@ -180,8 +180,8 @@ run_standalone_mode() {
     echo "[nacos-setup/skill-scanner] standalone: post-config reached (VERSION=${VERSION})" >&2
     if declare -F run_post_nacos_config_skill_scanner_hook >/dev/null 2>&1; then
         run_post_nacos_config_skill_scanner_hook
-        # Configure skill-scanner plugin properties if skill-scanner is available
-        if declare -F configure_skill_scanner_properties >/dev/null 2>&1; then
+        # Configure skill-scanner plugin properties only if skill-scanner is available
+        if command -v skill-scanner >/dev/null 2>&1 && declare -F configure_skill_scanner_properties >/dev/null 2>&1; then
             configure_skill_scanner_properties "$config_file"
         fi
     else

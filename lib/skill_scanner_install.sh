@@ -16,6 +16,50 @@ _SKILL_SCANNER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Always write to stderr (no ANSI); survives logging pipelines and makes sudo/root issues obvious.
 _skill_scanner_trace() { printf '%s\n' "[nacos-setup/skill-scanner] $*" >&2; }
 
+# Add skill-scanner to PATH if installed via pip/uv but not in PATH
+# This is idempotent - safe to call multiple times
+_ensure_skill_scanner_in_path() {
+    # If already in PATH, nothing to do
+    if command -v skill-scanner >/dev/null 2>&1; then
+        return 0
+    fi
+    
+    # Check common Python bin directories for skill-scanner
+    local py_dirs=""
+    
+    # Add pyenv Python directories if available
+    local pyenv_root="${PYENV_ROOT:-$HOME/.pyenv}"
+    if [ -d "$pyenv_root/versions" ]; then
+        for ver_dir in "$pyenv_root/versions"/*/bin; do
+            if [ -d "$ver_dir" ]; then
+                py_dirs="$py_dirs $ver_dir"
+            fi
+        done
+    fi
+    
+    # Add common Python installation paths
+    py_dirs="$py_dirs /usr/local/bin /opt/homebrew/bin /usr/bin"
+    
+    # Check each potential bin directory
+    for bin_dir in $py_dirs; do
+        if [ -x "$bin_dir/skill-scanner" ]; then
+            export PATH="$bin_dir:$PATH"
+            _skill_scanner_trace "added $bin_dir to PATH for skill-scanner"
+            return 0
+        fi
+    done
+    
+    # Also check user's local bin (pip --user install location)
+    local user_bin="$HOME/.local/bin"
+    if [ -x "$user_bin/skill-scanner" ]; then
+        export PATH="$user_bin:$PATH"
+        _skill_scanner_trace "added $user_bin to PATH for skill-scanner"
+        return 0
+    fi
+    
+    return 1
+}
+
 # Configure skill-scanner plugin properties in application.properties
 # Parameters: config_file
 configure_skill_scanner_properties() {
@@ -132,6 +176,9 @@ maybe_install_skill_scanner_for_nacos() {
         _skill_scanner_trace "skip: nacos ${nacos_version} < ${MIN_NACOS_VERSION_FOR_SKILL_SCANNER} (no skill-scanner step)"
         return 0
     fi
+
+    # Try to add skill-scanner to PATH if not already there
+    _ensure_skill_scanner_in_path
 
     print_info "Nacos ${nacos_version} >= ${MIN_NACOS_VERSION_FOR_SKILL_SCANNER}: checking Cisco skill-scanner (${SKILL_SCANNER_PYPI_PACKAGE})..."
     if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then

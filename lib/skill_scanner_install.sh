@@ -71,10 +71,11 @@ configure_skill_scanner_properties() {
     fi
     
     _skill_scanner_trace "configuring skill-scanner plugin properties in ${config_file}"
-    
-    update_config_property "$config_file" "nacos.plugin.skill-scanner.enabled" "true"
-    update_config_property "$config_file" "nacos.plugin.skill-scanner.type" "nacos"
-    
+
+    update_config_property "$config_file" "nacos.plugin.ai-pipeline.enabled" "true"
+    update_config_property "$config_file" "nacos.plugin.ai-pipeline.type" "skill-scanner"
+    update_config_property "$config_file" "nacos.plugin.ai-pipeline.skill-scanner.enabled" "true"
+
     _skill_scanner_trace "skill-scanner plugin properties configured successfully"
 }
 

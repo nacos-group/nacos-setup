@@ -141,7 +141,23 @@ start_nacos_process() {
     if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/java" ]; then
         export PATH="${JAVA_HOME}/bin:${PATH}"
     fi
-    
+
+    # Java diagnostics for troubleshooting unexpected runtime version.
+    local path_java
+    path_java=$(command -v java 2>/dev/null || true)
+    local path_java_ver="unknown"
+    if [ -n "$path_java" ]; then
+        path_java_ver=$(get_java_version "$path_java")
+    fi
+    local java_home_ver="unknown"
+    if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/java" ]; then
+        java_home_ver=$(get_java_version "${JAVA_HOME}/bin/java")
+    fi
+    print_info "Java startup diagnostics:"
+    print_info "  JAVA_HOME=${JAVA_HOME:-<unset>}"
+    print_info "  JAVA_HOME/bin/java version=${java_home_ver}"
+    print_info "  PATH java=${path_java:-<not-found>}"
+    print_info "  PATH java version=${path_java_ver}"
     # Start Nacos
     if [ "$use_derby" = true ] && [ "$mode" = "cluster" ]; then
         bash "$install_dir/bin/startup.sh" -m "$mode" -p embedded >/dev/null 2>&1

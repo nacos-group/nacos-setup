@@ -12,6 +12,7 @@ scripts=(
     "lib/standalone.sh"
     "lib/cluster.sh"
     "lib/download.sh"
+    "lib/data_import.sh"
     "lib/config_manager.sh"
     "lib/port_manager.sh"
     "lib/java_manager.sh"

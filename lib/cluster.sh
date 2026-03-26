@@ -24,6 +24,10 @@ source "$SCRIPT_DIR/download.sh"
 source "$SCRIPT_DIR/config_manager.sh"
 source "$SCRIPT_DIR/java_manager.sh"
 source "$SCRIPT_DIR/process_manager.sh"
+if [ -f "$SCRIPT_DIR/data_import.sh" ]; then
+    # shellcheck source=data_import.sh
+    source "$SCRIPT_DIR/data_import.sh"
+fi
 if [ -f "$SCRIPT_DIR/skill_scanner_install.sh" ]; then
     # shellcheck source=skill_scanner_install.sh
     source "$SCRIPT_DIR/skill_scanner_install.sh"
@@ -287,6 +291,13 @@ create_cluster() {
         fi
         
         rm -f "$config_file.bak"
+
+        print_info "  Importing default agentspec / skill data into $node_dir/data..."
+        if declare -F run_post_nacos_config_data_import_hook >/dev/null 2>&1; then
+            run_post_nacos_config_data_import_hook "$node_dir"
+        else
+            print_warn "Default data import hook not available, skipping"
+        fi
         
         local main_port="${node_main_ports[$i]}"
         local console_port="${node_console_ports[$i]}"
@@ -667,6 +678,14 @@ join_cluster() {
     
     rm -f "$config_file.bak"
     print_info "Node configured: main=$new_main_port, console=$new_console_port"
+    echo ""
+
+    print_info "Post-config: importing default agentspec / skill data into ${new_node_dir}/data..."
+    if declare -F run_post_nacos_config_data_import_hook >/dev/null 2>&1; then
+        run_post_nacos_config_data_import_hook "$new_node_dir"
+    else
+        print_warn "Default data import hook not available, skipping"
+    fi
     echo ""
 
     print_info "Post-config: optional Cisco skill-scanner step (Nacos ${VERSION})..."

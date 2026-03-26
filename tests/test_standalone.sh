@@ -83,6 +83,17 @@ else
     test_fail "standalone.sh not found"
 fi
 
+# 测试 6c: 默认 agentspec / skill 数据导入钩子
+if [ -f "$LIB_DIR/standalone.sh" ]; then
+    if grep -q "run_post_nacos_config_data_import_hook" "$LIB_DIR/standalone.sh"; then
+        test_pass "Standalone mode invokes default data import hook"
+    else
+        test_fail "Standalone mode should call run_post_nacos_config_data_import_hook"
+    fi
+else
+    test_fail "standalone.sh not found"
+fi
+
 # 测试 7: 检查单机模式数据源配置
 if [ -f "$LIB_DIR/standalone.sh" ]; then
     if grep -q "load_default_datasource_config\|apply_datasource_config" "$LIB_DIR/standalone.sh"; then

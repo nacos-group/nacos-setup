@@ -24,6 +24,10 @@ source "$SCRIPT_DIR/download.sh"
 source "$SCRIPT_DIR/config_manager.sh"
 source "$SCRIPT_DIR/java_manager.sh"
 source "$SCRIPT_DIR/process_manager.sh"
+if [ -f "$SCRIPT_DIR/data_import.sh" ]; then
+    # shellcheck source=data_import.sh
+    source "$SCRIPT_DIR/data_import.sh"
+fi
 if [ -f "$SCRIPT_DIR/skill_scanner_install.sh" ]; then
     # shellcheck source=skill_scanner_install.sh
     source "$SCRIPT_DIR/skill_scanner_install.sh"
@@ -173,6 +177,14 @@ run_standalone_mode() {
     
     rm -f "$config_file.bak"
     print_info "Configuration completed"
+    echo ""
+
+    print_info "Post-config: importing default agentspec / skill data into ${INSTALL_DIR}/data..."
+    if declare -F run_post_nacos_config_data_import_hook >/dev/null 2>&1; then
+        run_post_nacos_config_data_import_hook "$INSTALL_DIR"
+    else
+        print_warn "Default data import hook not available, skipping"
+    fi
     echo ""
 
     # stdout + stderr: some installs only surface [INFO]; stderr traces still go to skill_scanner_install.sh

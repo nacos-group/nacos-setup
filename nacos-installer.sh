@@ -897,41 +897,51 @@ main() {
         exit $?
     fi
 
-    # Install
-    install_nacos_setup "$setup_version"
-
-    # Verify
-    if verify_installation; then
-        print_usage_info
-
-        # Install nacos-cli if --cli flag is provided
-        if [[ "$install_cli" == true ]]; then
-            echo ""
-            install_nacos_cli
-        fi
-
-        # After installation, offer to install Nacos (default version)
+    # Check if nacos-setup is already installed
+    local setup_already_installed=false
+    if [ -L "$INSTALL_BASE_DIR/$CURRENT_LINK" ] && [ -f "$BIN_DIR/$SCRIPT_NAME" ]; then
+        setup_already_installed=true
+        print_info "nacos-setup is already installed, skipping reinstallation"
         echo ""
-        # Use server version from versions file or fallback
-        detected_default_version="${NACOS_SERVER_VERSION:-$FALLBACK_NACOS_SERVER_VERSION}"
-
-        read -p "Do you want to install Nacos $detected_default_version now? (Y/n): " -r REPLY
-        echo ""
-        if [[ "$REPLY" =~ ^[Yy]?$ ]] || [[ -z "$REPLY" ]]; then
-            print_info "Installing Nacos $detected_default_version..."
-            # Always use absolute path to ensure it works even if PATH is not yet loaded
-            "$BIN_DIR/$SCRIPT_NAME" -v "$detected_default_version"
-        else
-            print_info "Skipping Nacos installation."
-            print_info "To install later, run: $SCRIPT_NAME -v $detected_default_version"
-            print_info "Or use absolute path: $BIN_DIR/$SCRIPT_NAME -v $detected_default_version"
-        fi
-
-        exit 0
-    else
-        print_error "Installation verification failed"
-        exit 1
     fi
+
+    # Install nacos-setup only if not already installed
+    if [[ "$setup_already_installed" == false ]]; then
+        install_nacos_setup "$setup_version"
+        
+        # Verify installation
+        if ! verify_installation; then
+            print_error "Installation verification failed"
+            exit 1
+        fi
+        
+        print_usage_info
+    fi
+
+    # Install nacos-cli if --cli flag is provided
+    if [[ "$install_cli" == true ]]; then
+        echo ""
+        install_nacos_cli
+    fi
+
+    # Always offer to install Nacos Server (unless --cli only)
+    echo ""
+    # Use server version from versions file or fallback
+    detected_default_version="${NACOS_SERVER_VERSION:-$FALLBACK_NACOS_SERVER_VERSION}"
+
+    read -p "Do you want to install Nacos $detected_default_version now? (Y/n): " -r REPLY
+    echo ""
+    if [[ "$REPLY" =~ ^[Yy]?$ ]] || [[ -z "$REPLY" ]]; then
+        print_info "Installing Nacos $detected_default_version..."
+        # Always use absolute path to ensure it works even if PATH is not yet loaded
+        "$BIN_DIR/$SCRIPT_NAME" -v "$detected_default_version"
+    else
+        print_info "Skipping Nacos installation."
+        print_info "To install later, run: $SCRIPT_NAME -v $detected_default_version"
+        print_info "Or use absolute path: $BIN_DIR/$SCRIPT_NAME -v $detected_default_version"
+    fi
+
+    exit 0
 }
 
 # Run main

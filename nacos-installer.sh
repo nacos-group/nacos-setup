@@ -904,16 +904,35 @@ main() {
         exit $?
     fi
 
-    # Check if nacos-setup is already installed
+    # Check if nacos-setup is already installed and compare versions
     local setup_already_installed=false
+    local needs_upgrade=false
+    local local_version=""
+    
     if [ -L "$INSTALL_BASE_DIR/$CURRENT_LINK" ] && [ -f "$BIN_DIR/$SCRIPT_NAME" ]; then
         setup_already_installed=true
-        print_info "nacos-setup is already installed, skipping reinstallation"
+        # Get local installed version
+        local_version=$("$BIN_DIR/$SCRIPT_NAME" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        
+        # Compare versions if both are available
+        if [ -n "$local_version" ] && [ -n "$setup_version" ]; then
+            if [ "$setup_version" != "$local_version" ]; then
+                needs_upgrade=true
+                print_info "nacos-setup upgrade available: $local_version -> $setup_version"
+            else
+                print_info "nacos-setup $local_version is already installed, skipping reinstallation"
+            fi
+        else
+            print_info "nacos-setup is already installed, skipping reinstallation"
+        fi
         echo ""
     fi
 
-    # Install nacos-setup only if not already installed
-    if [[ "$setup_already_installed" == false ]]; then
+    # Install nacos-setup if not installed or needs upgrade
+    if [[ "$setup_already_installed" == false ]] || [[ "$needs_upgrade" == true ]]; then
+        if [[ "$needs_upgrade" == true ]]; then
+            print_info "Upgrading nacos-setup to $setup_version..."
+        fi
         install_nacos_setup "$setup_version"
         
         # Verify installation

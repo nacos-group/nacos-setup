@@ -210,8 +210,17 @@ run_standalone_mode() {
             echo ""
             
             if [ -n "$NACOS_PASSWORD" ] && [ "$NACOS_PASSWORD" != "nacos" ]; then
-                if ! initialize_admin_password "$SERVER_PORT" "$CONSOLE_PORT" "$VERSION" "$NACOS_PASSWORD"; then
-                    print_warn "Password initialization failed, you can change it manually after login"
+                print_info "Initializing admin password..."
+                if initialize_admin_password "$SERVER_PORT" "$CONSOLE_PORT" "$VERSION" "$NACOS_PASSWORD"; then
+                    print_info "Admin password initialized successfully"
+                    echo ""
+                    print_info "Auto-Generated Admin Password:"
+                    echo "  $NACOS_PASSWORD"
+                    echo ""
+                else
+                    print_warn "Password initialization failed (may already be set previously)"
+                    # Clear password so it won't be shown in completion info
+                    NACOS_PASSWORD=""
                 fi
             fi
         else
@@ -222,9 +231,9 @@ run_standalone_mode() {
         local nacos_major=$(echo "$VERSION" | cut -d. -f1)
         local console_url
         if [ "$nacos_major" -ge 3 ]; then
-            console_url="http://localhost:${CONSOLE_PORT}/index.html"
+            console_url="http://localhost:${CONSOLE_PORT}"
         else
-            console_url="http://localhost:${SERVER_PORT}/nacos/index.html"
+            console_url="http://localhost:${SERVER_PORT}/nacos"
         fi
         
         print_completion_info "$INSTALL_DIR" "$console_url" "$SERVER_PORT" "$CONSOLE_PORT" "$VERSION" "nacos" "$NACOS_PASSWORD"

@@ -504,14 +504,16 @@ function Run-Standalone {
                 if (Initialize-AdminPassword $serverPort $consolePort $Global:Version $Global:NACOS_PASSWORD) {
                     Write-Info "Admin password initialized successfully"
                 } else {
-                    Write-Warn "Password initialization failed, you can change it manually after login"
+                    Write-Warn "Password initialization failed (may already be set previously)"
+                    # Clear password so it won't be shown in completion info
+                    $Global:NACOS_PASSWORD = $null
                 }
             }
         } else {
             Write-Warn "Nacos may still be starting, please wait a moment"
         }
         $major = [int]($Global:Version.Split('.')[0])
-        $consoleUrl = if ($major -ge 3) { "http://localhost:$consolePort/index.html" } else { "http://localhost:$serverPort/nacos/index.html" }
+        $consoleUrl = if ($major -ge 3) { "http://localhost:$consolePort" } else { "http://localhost:$serverPort/nacos" }
         Print-CompletionInfo $Global:InstallDir $consoleUrl $serverPort $consolePort $Global:Version "nacos" $Global:NACOS_PASSWORD
 
         if ($Global:NACOS_PASSWORD -and (Copy-PasswordToClipboard $Global:NACOS_PASSWORD)) { 
@@ -660,7 +662,9 @@ function Run-Cluster {
             if (Initialize-AdminPassword $nodeMain[0] $nodeConsole[0] $Global:Version $Global:NACOS_PASSWORD) {
                 Write-Info "Admin password initialized successfully"
             } else {
-                Write-Warn "Password initialization failed"
+                Write-Warn "Password initialization failed (may already be set previously)"
+                # Clear password so it won't be shown in completion info
+                $Global:NACOS_PASSWORD = $null
             }
         }
 

@@ -357,7 +357,18 @@ create_cluster() {
         
         # Initialize password on first node
         if [ -n "$NACOS_PASSWORD" ] && [ "$NACOS_PASSWORD" != "nacos" ]; then
-            initialize_admin_password "${node_main_ports[0]}" "${node_console_ports[0]}" "$VERSION" "$NACOS_PASSWORD"
+            print_info "Initializing admin password..."
+            if initialize_admin_password "${node_main_ports[0]}" "${node_console_ports[0]}" "$VERSION" "$NACOS_PASSWORD"; then
+                print_info "Admin password initialized successfully"
+                echo ""
+                print_info "Auto-Generated Admin Password:"
+                echo "  $NACOS_PASSWORD"
+                echo ""
+            else
+                print_warn "Password initialization failed (may already be set previously)"
+                # Clear password so it won't be shown in completion info
+                NACOS_PASSWORD=""
+            fi
         fi
         
         # Print cluster info
@@ -470,9 +481,9 @@ print_cluster_info() {
     
     for i in "${!main_ports[@]}"; do
         if [ "$nacos_major" -ge 3 ]; then
-            echo "  Node $i: http://${local_ip}:${console_ports[$i]}/index.html"
+            echo "  Node $i: http://${local_ip}:${console_ports[$i]}"
         else
-            echo "  Node $i: http://${local_ip}:${main_ports[$i]}/nacos/index.html"
+            echo "  Node $i: http://${local_ip}:${main_ports[$i]}/nacos"
         fi
     done
     

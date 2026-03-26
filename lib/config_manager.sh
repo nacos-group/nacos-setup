@@ -396,10 +396,8 @@ configure_standalone_security() {
         echo "Server Identity Value:" >&2
         echo "  $IDENTITY_VALUE" >&2
         echo "" >&2
-        echo "Admin Password:" >&2
-        echo "  $NACOS_PASSWORD" >&2
-        echo "" >&2
         print_info "These credentials will be automatically configured" >&2
+        print_info "Admin password will be set after Nacos starts" >&2
     else
         # Advanced mode: interactive prompts
         print_info "" >&2

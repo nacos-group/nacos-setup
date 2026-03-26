@@ -300,7 +300,7 @@ print_completion_info() {
     local browser_success=false
     
     # Display authentication info and copy password
-    if [ -n "$password" ]; then
+    if [ -n "$password" ] && [ "$password" != "nacos" ]; then
         echo "Authentication is enabled. Please login with:"
         echo "  Username: $username"
         echo "  Password: $password"
@@ -311,23 +311,26 @@ print_completion_info() {
             clipboard_success=true
             print_info "✓ Password copied to clipboard!"
         fi
-    else
+    elif [ "$password" = "nacos" ]; then
         echo "Default login credentials:"
         echo "  Username: nacos"
         echo "  Password: nacos"
         echo ""
-    fi
-    
-    # Security reminder
-    if [ -z "$password" ] || [ "$password" = "nacos" ]; then
         print_warn "SECURITY WARNING: Using default password!"
         print_info "Please change the password after login for security"
+        echo ""
+    else
+        # Password is empty - means initialization failed, password was set previously
+        echo "Authentication is enabled."
+        echo "Please login with your previously set credentials."
+        echo ""
+        print_info "If you forgot the password, please reset it manually"
         echo ""
     fi
     
     # Try to open browser (only if password copied or using default)
     local should_open_browser=false
-    if [ -z "$password" ] || [ "$password" = "nacos" ] || [ "$clipboard_success" = true ]; then
+    if [ "$password" = "nacos" ] || [ "$clipboard_success" = true ]; then
         should_open_browser=true
     fi
     

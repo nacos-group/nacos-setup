@@ -80,10 +80,8 @@ function Configure-Standalone-Security($configFile, $advancedMode) {
         Write-Host "Server Identity Value:"
         Write-Host "  $($Global:IDENTITY_VALUE)"
         Write-Host ""
-        Write-Host "Admin Password:"
-        Write-Host "  $($Global:NACOS_PASSWORD)"
-        Write-Host ""
         Write-Info "These credentials will be automatically configured"
+        Write-Info "Admin password will be set after Nacos starts"
     } else {
         $Global:TOKEN_SECRET = Read-Host "Enter JWT token secret key (empty for auto)"
         if (-not $Global:TOKEN_SECRET) { $Global:TOKEN_SECRET = Generate-SecretKey }
@@ -249,7 +247,7 @@ function Edit-DatasourceConfig($configName = $null) {
 }
 
 function Show-DatasourceConfig($configName = $null) {
-    $targetFile = Resolve-ConfigPath $configName
+    $targetFile = Resolve-ConfigPath($configName)
 
     Write-Host ""
     Write-Info "========================================"

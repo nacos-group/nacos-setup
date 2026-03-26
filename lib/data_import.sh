@@ -5,8 +5,8 @@
 # you may not use this file except in compliance with the License.
 
 # Import default agentspec / skill data into the Nacos data directory.
-# Mirrors the nacos-docker image behavior by downloading the official
-# archives once and extracting them into each installed node's data folder.
+# Downloads the official archives once and copies the original zip files
+# into each installed node's data folder.
 
 DEFAULT_SKILLS_DATA_URL="${NACOS_SETUP_SKILLS_DATA_URL:-https://download.nacos.io/nacos-server-data/skills-data.zip}"
 DEFAULT_AGENTSPEC_DATA_URL="${NACOS_SETUP_AGENTSPEC_DATA_URL:-https://download.nacos.io/nacos-server-data/agentspec-data.zip}"
@@ -77,6 +77,7 @@ _import_default_data_archive() {
     local archive_name=$2
     local archive_url=$3
     local data_dir="${install_dir}/data"
+    local target_archive="${data_dir}/${archive_name}.zip"
     local marker_file="${data_dir}/.nacos-setup-${archive_name}.url"
     local archive_file=""
 
@@ -92,13 +93,13 @@ _import_default_data_archive() {
 
     archive_file=$(_download_default_data_archive "$archive_name" "$archive_url") || return 0
 
-    print_info "Importing ${archive_name} into ${data_dir}"
-    if unzip -oq "$archive_file" -d "$data_dir" >/dev/null 2>&1; then
+    print_info "Copying ${archive_name}.zip into ${data_dir}"
+    if cp "$archive_file" "$target_archive" 2>/dev/null; then
         printf '%s\n' "$archive_url" > "$marker_file"
         return 0
     fi
 
-    print_warn "Failed to extract ${archive_name} into ${data_dir}"
+    print_warn "Failed to copy ${archive_name}.zip into ${data_dir}"
     return 0
 }
 

@@ -3,6 +3,8 @@
 # you may not use this file except in compliance with the License.
 
 # Import default agentspec / skill data into the Nacos data directory.
+# Downloads the official archives once and copies the original zip files
+# into each installed node's data folder.
 
 $script:DefaultSkillsDataUrl = if ($env:NACOS_SETUP_SKILLS_DATA_URL) {
     $env:NACOS_SETUP_SKILLS_DATA_URL
@@ -94,6 +96,7 @@ function Import-DefaultDataArchive {
     )
 
     $dataDir = Join-Path $InstallDir "data"
+    $targetArchive = Join-Path $dataDir "$ArchiveName.zip"
     $markerFile = Join-Path $dataDir ".nacos-setup-$ArchiveName.url"
 
     Ensure-Directory $dataDir
@@ -109,12 +112,12 @@ function Import-DefaultDataArchive {
     $archiveFile = Get-DefaultDataArchive $ArchiveName $ArchiveUrl
     if (-not $archiveFile) { return }
 
-    Write-Info "Importing $ArchiveName into $dataDir"
+    Write-Info "Copying $ArchiveName.zip into $dataDir"
     try {
-        Expand-Archive -Path $archiveFile -DestinationPath $dataDir -Force
+        Copy-Item -Path $archiveFile -Destination $targetArchive -Force
         Set-Content -Path $markerFile -Value $ArchiveUrl -Encoding ASCII
     } catch {
-        Write-Warn "Failed to extract $ArchiveName into $dataDir"
+        Write-Warn "Failed to copy $ArchiveName.zip into $dataDir"
     }
 }
 

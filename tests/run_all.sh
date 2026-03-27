@@ -28,6 +28,11 @@ test_cases=(
     "test_dbconf.sh:--db-conf Feature"
     "test_package.sh:Package Script"
     "test_bugs.sh:Bug Verification"
+    "test_install_paths.sh:Install Path Constants"
+    "test_no_sudo.sh:No Sudo Suggestions"
+    "test_skill_scanner_sudo.sh:Skill Scanner Sudo Removal"
+    "test_path_management.sh:PATH Management"
+    "test_uninstall.sh:Uninstall Cleanup"
 )
 
 for test_case in "${test_cases[@]}"; do

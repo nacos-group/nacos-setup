@@ -34,9 +34,9 @@ print_error() {
 
 DOWNLOAD_BASE_URL="https://download.nacos.io"
 
-INSTALL_BASE_DIR="/usr/local"
+INSTALL_BASE_DIR="$HOME/.nacos/nacos-setup"
 CURRENT_LINK="nacos-setup"
-BIN_DIR="/usr/local/bin"
+BIN_DIR="$HOME/.nacos/bin"
 SCRIPT_NAME="nacos-setup"
 TEMP_DIR="/tmp/nacos-setup-install-$$"
 CACHE_DIR="${HOME}/.nacos/cache"  # 缓存目录
@@ -166,17 +166,20 @@ check_requirements() {
     fi
     
     # Check if we have write permission to install directory
+    # For user-level paths, attempt to create directories first since they may not exist yet
     local mode="${1:-full}"
     if [[ "$mode" == "onlycli" ]]; then
+        mkdir -p "$BIN_DIR" 2>/dev/null
         if [ ! -w "$BIN_DIR" ]; then
             print_warn "No write permission to $BIN_DIR"
-            print_warn "You may need to run with sudo"
+            print_warn "Please check directory permissions or create the directory manually: mkdir -p $BIN_DIR"
             return 1
         fi
     else
+        mkdir -p "$INSTALL_BASE_DIR" "$BIN_DIR" 2>/dev/null
         if [ ! -w "$INSTALL_BASE_DIR" ]; then
             print_warn "No write permission to $INSTALL_BASE_DIR"
-            print_warn "You may need to run with sudo"
+            print_warn "Please check directory permissions or create the directory manually: mkdir -p $INSTALL_BASE_DIR"
             return 1
         fi
     fi
@@ -332,6 +335,10 @@ install_nacos_setup() {
     
     print_info "Target version: $setup_version"
     
+    # Ensure installation directories exist
+    mkdir -p "$INSTALL_BASE_DIR"
+    mkdir -p "$BIN_DIR"
+    
     # Download nacos-setup (with caching)
     # If cached version exists, it will be used directly
     # If not, download from remote and save to cache
@@ -446,17 +453,6 @@ install_nacos_setup() {
     
     # Store version info
     echo "$setup_version" > "$INSTALL_DIR/.version"
-    
-    # Fix permissions for Nacos installation directory
-    # Allow current user to manage Nacos instances without sudo
-    local nacos_base_dir="${HOME}/ai-infra/nacos"
-    if [ -d "$nacos_base_dir" ]; then
-        print_info "Setting ownership of Nacos directory to current user..."
-        if ! sudo chown -R "$USER:$(id -gn)" "$nacos_base_dir" 2>/dev/null; then
-            print_warn "Failed to change ownership of $nacos_base_dir"
-            print_info "You can fix this manually with: sudo chown -R \$USER:\$(id -gn) $nacos_base_dir"
-        fi
-    fi
     
     print_success "Installation completed!"
     echo ""
@@ -645,52 +641,62 @@ verify_installation() {
         fi
     fi
     
-    if ! command -v $SCRIPT_NAME >/dev/null 2>&1; then
-        print_info "Configuring PATH automatically..."
-        
-        # Detect shell configuration file
-        local shell_config=""
-        if [ -n "$SHELL" ]; then
-            case "$SHELL" in
-                */zsh)
-                    shell_config="$HOME/.zshrc"
-                    ;;
-                */bash)
-                    shell_config="$HOME/.bashrc"
-                    ;;
-            esac
-        fi
-        
-        # Fallback: detect by checking which file exists
-        if [ -z "$shell_config" ]; then
-            if [ -f "$HOME/.zshrc" ]; then
-                shell_config="$HOME/.zshrc"
-            elif [ -f "$HOME/.bashrc" ]; then
-                shell_config="$HOME/.bashrc"
-            else
-                # Create .bashrc if nothing exists
-                shell_config="$HOME/.bashrc"
+    # Check if BIN_DIR is already in PATH
+    case ":$PATH:" in
+        *":$BIN_DIR:"*)
+            print_info "$BIN_DIR is already in PATH"
+            ;;
+        *)
+            print_info "Configuring PATH automatically..."
+
+            # Detect shell configuration file
+            local shell_config=""
+            if [ -n "$SHELL" ]; then
+                case "$SHELL" in
+                    */zsh)
+                        shell_config="$HOME/.zshrc"
+                        ;;
+                    */bash)
+                        shell_config="$HOME/.bashrc"
+                        ;;
+                esac
             fi
-        fi
-        
-        # Check if PATH is already configured
-        local path_export="export PATH=\"$BIN_DIR:\$PATH\""
-        if ! grep -qF "$BIN_DIR" "$shell_config" 2>/dev/null; then
-            echo "" >> "$shell_config"
-            echo "# Added by nacos-setup installer" >> "$shell_config"
-            echo "$path_export" >> "$shell_config"
-            print_success "PATH configured in $shell_config"
-        else
-            print_info "PATH already configured in $shell_config"
-        fi
-        
-        # Note: We cannot automatically source in the current shell due to shell limitations
-        # The script runs in a subshell, sourcing only affects the subshell, not the parent shell
-        # But we can use the command directly via absolute path
-        print_info "PATH will be available in new terminal sessions"
-        echo ""
-        return 0
-    fi
+
+            # Fallback: detect by checking which file exists
+            if [ -z "$shell_config" ]; then
+                if [ -f "$HOME/.zshrc" ]; then
+                    shell_config="$HOME/.zshrc"
+                elif [ -f "$HOME/.bashrc" ]; then
+                    shell_config="$HOME/.bashrc"
+                else
+                    # Create .bashrc if nothing exists
+                    shell_config="$HOME/.bashrc"
+                fi
+            fi
+
+            # Check if the export line already exists in the config file (idempotent)
+            local path_export_line='export PATH="$HOME/.nacos/bin:$PATH"'
+            if grep -qF "$path_export_line" "$shell_config" 2>/dev/null; then
+                print_info "PATH already configured in $shell_config"
+            else
+                echo "" >> "$shell_config"
+                echo "# Added by nacos-setup installer" >> "$shell_config"
+                echo "$path_export_line" >> "$shell_config"
+                print_success "PATH configured in $shell_config"
+            fi
+
+            # Ask user whether to activate PATH now
+            read -p "Activate PATH now? (Y/n): " -r REPLY
+            echo ""
+            if [[ "$REPLY" =~ ^[Nn]$ ]]; then
+                print_info "To activate PATH manually, run: source $shell_config"
+                print_info "Or open a new terminal session."
+            else
+                export PATH="$HOME/.nacos/bin:$PATH"
+                print_success "PATH has been activated in the current session."
+            fi
+            ;;
+    esac
     
     print_success "Installation verified successfully!"
     echo ""
@@ -781,11 +787,20 @@ uninstall_nacos_setup() {
         print_warn "No active installation found at $INSTALL_BASE_DIR/$CURRENT_LINK"
     fi
 
-    # Remove global command
+    # Remove global command (nacos-setup symlink)
     if [ -L "$BIN_DIR/$SCRIPT_NAME" ] || [ -f "$BIN_DIR/$SCRIPT_NAME" ]; then
         rm -f "$BIN_DIR/$SCRIPT_NAME"
         print_success "Removed $BIN_DIR/$SCRIPT_NAME"
     fi
+
+    # Remove nacos-cli binary
+    if [ -f "$BIN_DIR/nacos-cli" ]; then
+        rm -f "$BIN_DIR/nacos-cli"
+        print_success "Removed $BIN_DIR/nacos-cli"
+    fi
+
+    # Note: ~/.nacos parent directory is intentionally preserved
+    # as it may contain cache and other user data
 
     print_success "Uninstallation completed!"
     echo ""
@@ -845,7 +860,7 @@ main() {
                 shift 2
                 ;;
             --help|-h)
-                echo "Usage: curl -fsSL https://nacos.io/installer.sh | sudo bash"
+                echo "Usage: curl -fsSL https://nacos.io/installer.sh | bash"
                 echo ""
                 echo "Install nacos-setup and nacos-cli tools for managing Nacos instances."
                 echo ""
@@ -894,7 +909,7 @@ main() {
     
     if ! check_requirements "$check_mode"; then
         print_error "Requirements check failed"
-        print_info "Try running with sudo: curl -fsSL https://nacos.io/installer.sh | sudo bash"
+        print_info "Please install the missing dependencies and try again."
         exit 1
     fi
 

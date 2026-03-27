@@ -6,15 +6,13 @@
 
 # Optional Cisco skill-scanner (https://github.com/cisco-ai-defense/skill-scanner)
 # PyPI: cisco-ai-skill-scanner — requires Python 3.10+ and uv.
-# When invoked via "sudo nacos-setup", Python/uv are resolved in SUDO_USER's
-# environment (same as running without sudo), so Homebrew/user installs are visible.
 
 SKILL_SCANNER_PYPI_PACKAGE="cisco-ai-skill-scanner"
 MIN_NACOS_VERSION_FOR_SKILL_SCANNER="3.2.0"
 _SKILL_SCANNER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_SCANNER_VENV_PATH_RELATIVE="ai-infra/.venv"
 
-# Always write to stderr (no ANSI); survives logging pipelines and makes sudo/root issues obvious.
+# Always write to stderr (no ANSI); survives logging pipelines.
 _skill_scanner_trace() { printf '%s\n' "[nacos-setup/skill-scanner] $*" >&2; }
 
 # Add skill-scanner to PATH if installed via pip/uv but not in PATH
@@ -95,13 +93,9 @@ run_post_nacos_config_skill_scanner_hook() {
     return 0
 }
 
-# Run as the user who invoked sudo (so PATH/HOME match a normal login).
+# Run the given command directly (no privilege changes).
 _skill_scanner_runas_target_user() {
-    if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && command -v sudo >/dev/null 2>&1; then
-        sudo -u "$SUDO_USER" -H "$@"
-    else
-        "$@"
-    fi
+    "$@"
 }
 
 _find_python_310_plus() {
@@ -237,9 +231,6 @@ maybe_install_skill_scanner_for_nacos() {
     _ensure_skill_scanner_in_path
 
     print_info "Nacos ${nacos_version} >= ${MIN_NACOS_VERSION_FOR_SKILL_SCANNER}: checking Cisco skill-scanner (${SKILL_SCANNER_PYPI_PACKAGE})..."
-    if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
-        print_info "sudo detected: using user ${SUDO_USER}'s environment for Python / uv (root often lacks Homebrew Python)."
-    fi
 
     if ! _skill_scanner_runas_target_user bash -c 'command -v uv >/dev/null 2>&1'; then
         print_warn "No uv environment detected. Cannot install ${SKILL_SCANNER_PYPI_PACKAGE}."

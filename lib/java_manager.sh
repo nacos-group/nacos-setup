@@ -154,6 +154,11 @@ resolve_java_home_from_cmd() {
         return 1
     fi
 
+    # Check for macOS Java stub - it doesn't have a real JAVA_HOME
+    if is_macos_java_stub "$java_path"; then
+        return 1
+    fi
+
     # Resolve symlink chain for a stable JAVA_HOME
     if command -v readlink >/dev/null 2>&1; then
         local resolved_f=""
@@ -294,11 +299,27 @@ check_java_requirements() {
 # Returns: JVM options string or empty
 get_java_runtime_options() {
     local java_cmd="${JAVA_HOME:-/usr}/bin/java"
+    
     if [ ! -x "$java_cmd" ]; then
         java_cmd=$(which java 2>/dev/null || echo "java")
     fi
     
-    local java_version=$("$java_cmd" -version 2>&1 | head -1)
+    # Check for macOS Java stub
+    if is_macos_java_stub "$java_cmd"; then
+        echo ""
+        return
+    fi
+    
+    local java_version
+    # Use timeout to prevent hanging
+    if command -v timeout >/dev/null 2>&1; then
+        java_version=$(timeout 5 "$java_cmd" -version 2>&1 | head -1)
+    elif command -v gtimeout >/dev/null 2>&1; then
+        java_version=$(gtimeout 5 "$java_cmd" -version 2>&1 | head -1)
+    else
+        java_version=$("$java_cmd" -version 2>&1 | head -1)
+    fi
+    
     local java_major_version=$(echo "$java_version" | sed -E -n 's/.* version "([0-9]+).*/\1/p')
     
     # For JDK 9+, add module access parameters

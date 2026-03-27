@@ -11,6 +11,7 @@ SKILL_SCANNER_PYPI_PACKAGE="cisco-ai-skill-scanner"
 MIN_NACOS_VERSION_FOR_SKILL_SCANNER="3.2.0"
 _SKILL_SCANNER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_SCANNER_VENV_PATH_RELATIVE="ai-infra/.venv"
+SKILL_SCANNER_INSTALLED="false"
 
 # Always write to stderr (no ANSI); survives logging pipelines.
 _skill_scanner_trace() { printf '%s\n' "[nacos-setup/skill-scanner] $*" >&2; }
@@ -59,6 +60,18 @@ _ensure_skill_scanner_in_path() {
     return 1
 }
 
+# Return the actual path to the skill-scanner executable.
+# Prefers the venv bin path; falls back to command -v.
+_get_skill_scanner_command_path() {
+    local venv_dir
+    venv_dir=$(_skill_scanner_venv_dir_for_user 2>/dev/null || true)
+    if [ -n "$venv_dir" ] && [ -x "${venv_dir}/bin/skill-scanner" ]; then
+        printf '%s\n' "${venv_dir}/bin/skill-scanner"
+        return 0
+    fi
+    command -v skill-scanner 2>/dev/null
+}
+
 # Configure skill-scanner plugin properties in application.properties
 # Parameters: config_file
 configure_skill_scanner_properties() {
@@ -74,6 +87,12 @@ configure_skill_scanner_properties() {
     update_config_property "$config_file" "nacos.plugin.ai-pipeline.enabled" "true"
     update_config_property "$config_file" "nacos.plugin.ai-pipeline.type" "skill-scanner"
     update_config_property "$config_file" "nacos.plugin.ai-pipeline.skill-scanner.enabled" "true"
+
+    local scanner_cmd
+    scanner_cmd=$(_get_skill_scanner_command_path || true)
+    if [ -n "$scanner_cmd" ]; then
+        update_config_property "$config_file" "nacos.plugin.ai-pipeline.skill-scanner.command" "$scanner_cmd"
+    fi
 
     _skill_scanner_trace "skill-scanner plugin properties configured successfully"
 }
@@ -185,8 +204,8 @@ _confirm_skill_scanner_install() {
     fi
 
     local confirm
-    read -r -p "Install Cisco skill-scanner into ~/ai-infra/.venv now? (y/N): " confirm
-    [[ "$confirm" =~ ^[Yy]$ ]]
+    read -r -p "Install Cisco skill-scanner into ~/ai-infra/.venv now? (Y/n): " confirm
+    [[ ! "$confirm" =~ ^[Nn]$ ]]
 }
 
 _skill_scanner_ensure_version_ge() {
@@ -250,6 +269,7 @@ maybe_install_skill_scanner_for_nacos() {
     local venv_python="${venv_dir}/bin/python"
 
     if [ -x "$venv_python" ] && _skill_scanner_installed_in_venv "$venv_python"; then
+        SKILL_SCANNER_INSTALLED="true"
         print_info "skill-scanner already installed in ${venv_dir} (skip)."
         return 0
     fi
@@ -270,6 +290,7 @@ maybe_install_skill_scanner_for_nacos() {
 
     print_info "Installing ${SKILL_SCANNER_PYPI_PACKAGE} into ${venv_dir} via uv..."
     if _install_skill_scanner_uv_in_venv "$venv_python"; then
+        SKILL_SCANNER_INSTALLED="true"
         if _skill_scanner_ensure_venv_bin_in_path "$venv_dir"; then
             print_info "Added ${venv_dir}/bin to PATH (current session and shell rc files)."
         else

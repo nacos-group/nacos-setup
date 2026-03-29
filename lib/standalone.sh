@@ -24,6 +24,10 @@ source "$SCRIPT_DIR/download.sh"
 source "$SCRIPT_DIR/config_manager.sh"
 source "$SCRIPT_DIR/java_manager.sh"
 source "$SCRIPT_DIR/process_manager.sh"
+if [ -f "$SCRIPT_DIR/data_import.sh" ]; then
+    # shellcheck source=data_import.sh
+    source "$SCRIPT_DIR/data_import.sh"
+fi
 if [ -f "$SCRIPT_DIR/skill_scanner_install.sh" ]; then
     # shellcheck source=skill_scanner_install.sh
     source "$SCRIPT_DIR/skill_scanner_install.sh"
@@ -175,11 +179,23 @@ run_standalone_mode() {
     print_info "Configuration completed"
     echo ""
 
+    print_info "Post-config: importing default agentspec / skill data into ${INSTALL_DIR}/data..."
+    if declare -F run_post_nacos_config_data_import_hook >/dev/null 2>&1; then
+        run_post_nacos_config_data_import_hook "$INSTALL_DIR"
+    else
+        print_warn "Default data import hook not available, skipping"
+    fi
+    echo ""
+
     # stdout + stderr: some installs only surface [INFO]; stderr traces still go to skill_scanner_install.sh
     print_info "Post-config: optional Cisco skill-scanner step (Nacos ${VERSION})..."
     echo "[nacos-setup/skill-scanner] standalone: post-config reached (VERSION=${VERSION})" >&2
     if declare -F run_post_nacos_config_skill_scanner_hook >/dev/null 2>&1; then
         run_post_nacos_config_skill_scanner_hook
+        # Configure skill-scanner plugin properties only if skill-scanner was installed in this session
+        if [ "$SKILL_SCANNER_INSTALLED" = "true" ] && declare -F configure_skill_scanner_properties >/dev/null 2>&1; then
+            configure_skill_scanner_properties "$config_file"
+        fi
     else
         echo "[nacos-setup/skill-scanner] ERROR: run_post_nacos_config_skill_scanner_hook missing; add lib/skill_scanner_install.sh to $SCRIPT_DIR" >&2
     fi
@@ -210,8 +226,17 @@ run_standalone_mode() {
             echo ""
             
             if [ -n "$NACOS_PASSWORD" ] && [ "$NACOS_PASSWORD" != "nacos" ]; then
-                if ! initialize_admin_password "$SERVER_PORT" "$CONSOLE_PORT" "$VERSION" "$NACOS_PASSWORD"; then
-                    print_warn "Password initialization failed, you can change it manually after login"
+                print_info "Initializing admin password..."
+                if initialize_admin_password "$SERVER_PORT" "$CONSOLE_PORT" "$VERSION" "$NACOS_PASSWORD"; then
+                    print_info "Admin password initialized successfully"
+                    echo ""
+                    print_info "Auto-Generated Admin Password:"
+                    echo "  $NACOS_PASSWORD"
+                    echo ""
+                else
+                    print_warn "Password initialization failed (may already be set previously)"
+                    # Clear password so it won't be shown in completion info
+                    NACOS_PASSWORD=""
                 fi
             fi
         else
@@ -222,9 +247,9 @@ run_standalone_mode() {
         local nacos_major=$(echo "$VERSION" | cut -d. -f1)
         local console_url
         if [ "$nacos_major" -ge 3 ]; then
-            console_url="http://localhost:${CONSOLE_PORT}/index.html"
+            console_url="http://localhost:${CONSOLE_PORT}"
         else
-            console_url="http://localhost:${SERVER_PORT}/nacos/index.html"
+            console_url="http://localhost:${SERVER_PORT}/nacos"
         fi
         
         print_completion_info "$INSTALL_DIR" "$console_url" "$SERVER_PORT" "$CONSOLE_PORT" "$VERSION" "nacos" "$NACOS_PASSWORD"

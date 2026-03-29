@@ -110,14 +110,22 @@ function Print-CompletionInfo($installDir, $consoleUrl, $serverPort, $consolePor
     Write-Host "  - Raft Port: $($serverPort - 1000)"
     if ([int]($version.Split('.')[0]) -ge 3) { Write-Host "  - Console Port: $consolePort" }
     Write-Host ""
-    if ($password) {
+    if ($password -and $password -ne "nacos") {
         Write-Host "Authentication is enabled. Please login with:"
         Write-Host "  Username: $username"
         Write-Host "  Password: $password"
-    } else {
+    } elseif ($password -eq "nacos") {
         Write-Host "Default login credentials:"
         Write-Host "  Username: nacos"
         Write-Host "  Password: nacos"
+        Write-Host ""
+        Write-Warn "SECURITY WARNING: Using default password!"
+        Write-Info "Please change the password after login for security"
+    } else {
+        Write-Host "Authentication is enabled."
+        Write-Host "Please login with your previously set credentials."
+        Write-Host ""
+        Write-Info "If you forgot the password, please reset it manually"
     }
     Write-Host ""
     Write-Host "========================================"
@@ -162,18 +170,31 @@ function Print-ClusterCompletionInfo($clusterDir, $clusterId, $nodeMain, $nodeCo
         $cp = $nodeConsole[$i]
         
         $url = if ($major -ge 3) { 
-            "http://${localIp}:${cp}/index.html" 
+            "http://${localIp}:${cp}" 
         } else { 
-            "http://${localIp}:${mp}/nacos/index.html" 
+            "http://${localIp}:${mp}/nacos" 
         }
         Write-Host "  Node ${i}: $url"
     }
 
     Write-Host ""
-    if ($password) {
+    if ($password -and $password -ne "nacos") {
         Write-Host "Login credentials:"
         Write-Host "  Username: $username"
         Write-Host "  Password: $password"
+    } elseif ($password -eq "nacos") {
+        Write-Host "Login credentials:"
+        Write-Host "  Username: $username"
+        Write-Host "  Password: $password"
+        Write-Host ""
+        Write-Warn "SECURITY WARNING: Using default password!"
+        Write-Info "Please change the password after login for security"
+    } else {
+        # Password is empty - means initialization failed, password was set previously
+        Write-Host "Authentication is enabled."
+        Write-Host "Please login with your previously set credentials."
+        Write-Host ""
+        Write-Info "If you forgot the password, please reset it manually"
     }
 
     Write-Host ""
@@ -181,5 +202,5 @@ function Print-ClusterCompletionInfo($clusterDir, $clusterId, $nodeMain, $nodeCo
     Write-Host "Perfect !"
     Write-Host "========================================"
     
-    return "http://${localIp}:$(if($major -ge 3) { $nodeConsole[0] } else { $nodeMain[0] })$(if($major -lt 3) { '/nacos/index.html' } else { '/index.html' })"
+    return "http://${localIp}:$(if($major -ge 3) { $nodeConsole[0] } else { $nodeMain[0] })$(if($major -lt 3) { '/nacos' } else { '' })"
 }

@@ -133,6 +133,64 @@ search_java_installation() {
 # Java Environment Setup
 # ============================================================================
 
+# Resolve JAVA_HOME from a java command path.
+# Parameters: java_cmd
+# Returns: resolved JAVA_HOME path or empty
+resolve_java_home_from_cmd() {
+    local java_cmd=$1
+    local java_path=""
+
+    if [ -z "$java_cmd" ]; then
+        return 1
+    fi
+
+    if [[ "$java_cmd" = /* ]]; then
+        java_path="$java_cmd"
+    else
+        java_path=$(command -v "$java_cmd" 2>/dev/null || true)
+    fi
+
+    if [ -z "$java_path" ]; then
+        return 1
+    fi
+
+    # Check for macOS Java stub - it doesn't have a real JAVA_HOME
+    if is_macos_java_stub "$java_path"; then
+        return 1
+    fi
+
+    # Resolve symlink chain for a stable JAVA_HOME
+    if command -v readlink >/dev/null 2>&1; then
+        local resolved_f=""
+        resolved_f=$(readlink -f "$java_path" 2>/dev/null || true)
+        if [ -n "$resolved_f" ] && [ -x "$resolved_f" ]; then
+            java_path="$resolved_f"
+        else
+            local link="$java_path"
+            local i=0
+            while [ $i -lt 10 ]; do
+                local next
+                next=$(readlink "$link" 2>/dev/null || true)
+                [ -n "$next" ] || break
+                if [[ "$next" = /* ]]; then
+                    link="$next"
+                else
+                    link="$(cd "$(dirname "$link")" && cd "$(dirname "$next")" && pwd)/$(basename "$next")"
+                fi
+                i=$((i + 1))
+            done
+            if [ -x "$link" ]; then
+                java_path="$link"
+            fi
+        fi
+    fi
+
+    local java_home
+    java_home="$(dirname "$(dirname "$java_path")")"
+    [ -d "$java_home" ] || return 1
+    printf '%s\n' "$java_home"
+}
+
 # Check and setup Java environment
 # Parameters: nacos_version, advanced_mode
 # Returns: 0 on success, 1 on failure
@@ -176,6 +234,15 @@ check_java_requirements() {
             print_warn "Java $JAVA_VERSION in PATH is below required version $required_java_version"
             print_info "Searching for a suitable Java version..."
             JAVA_CMD=""
+        fi
+    fi
+
+    # Ensure JAVA_HOME always matches selected JAVA_CMD (including PATH-discovered java).
+    if [ -n "$JAVA_CMD" ]; then
+        local resolved_java_home
+        resolved_java_home=$(resolve_java_home_from_cmd "$JAVA_CMD" || true)
+        if [ -n "$resolved_java_home" ] && [ -x "$resolved_java_home/bin/java" ]; then
+            export JAVA_HOME="$resolved_java_home"
         fi
     fi
     
@@ -232,11 +299,27 @@ check_java_requirements() {
 # Returns: JVM options string or empty
 get_java_runtime_options() {
     local java_cmd="${JAVA_HOME:-/usr}/bin/java"
+    
     if [ ! -x "$java_cmd" ]; then
         java_cmd=$(which java 2>/dev/null || echo "java")
     fi
     
-    local java_version=$("$java_cmd" -version 2>&1 | head -1)
+    # Check for macOS Java stub
+    if is_macos_java_stub "$java_cmd"; then
+        echo ""
+        return
+    fi
+    
+    local java_version
+    # Use timeout to prevent hanging
+    if command -v timeout >/dev/null 2>&1; then
+        java_version=$(timeout 5 "$java_cmd" -version 2>&1 | head -1)
+    elif command -v gtimeout >/dev/null 2>&1; then
+        java_version=$(gtimeout 5 "$java_cmd" -version 2>&1 | head -1)
+    else
+        java_version=$("$java_cmd" -version 2>&1 | head -1)
+    fi
+    
     local java_major_version=$(echo "$java_version" | sed -E -n 's/.* version "([0-9]+).*/\1/p')
     
     # For JDK 9+, add module access parameters

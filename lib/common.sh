@@ -155,15 +155,58 @@ get_local_ip() {
 # Java Detection
 # ============================================================================
 
+# Check if the given path is macOS Java stub (not a real Java installation)
+# macOS stub is small and located at /usr/bin/java
+is_macos_java_stub() {
+    local java_path=$1
+    # Check if it's the macOS stub at /usr/bin/java
+    if [ "$java_path" = "/usr/bin/java" ]; then
+        # Check file size - macOS stub is typically < 100KB, real java is larger
+        local file_size
+        file_size=$(stat -f%z "$java_path" 2>/dev/null || stat -c%s "$java_path" 2>/dev/null || echo "0")
+        if [ "$file_size" -lt 200000 ]; then
+            return 0  # It's a stub
+        fi
+    fi
+    return 1  # Not a stub
+}
+
 # Get Java version from java command
 get_java_version() {
     local java_cmd=$1
-    # Use sed for cross-platform compatibility
-    local version=$($java_cmd -version 2>&1 | head -1 | sed -n 's/.*version "\([0-9]*\).*/\1/p')
+    
+    # Check if it's macOS stub first
+    local java_path
+    if [[ "$java_cmd" = /* ]]; then
+        java_path="$java_cmd"
+    else
+        java_path=$(command -v "$java_cmd" 2>/dev/null || echo "")
+    fi
+    
+    if [ -n "$java_path" ] && is_macos_java_stub "$java_path"; then
+        echo "0"
+        return
+    fi
+    
+    # Use timeout to prevent hanging on macOS stub (5 seconds should be enough)
+    local version
+    if command -v timeout >/dev/null 2>&1; then
+        version=$(timeout 5 $java_cmd -version 2>&1 | head -1 | sed -n 's/.*version "\([0-9]*\).*/\1/p')
+    elif command -v gtimeout >/dev/null 2>&1; then
+        version=$(gtimeout 5 $java_cmd -version 2>&1 | head -1 | sed -n 's/.*version "\([0-9]*\).*/\1/p')
+    else
+        version=$($java_cmd -version 2>&1 | head -1 | sed -n 's/.*version "\([0-9]*\).*/\1/p')
+    fi
     
     # Handle Java version format like "1.8.0" -> extract "8"
     if [ -z "$version" ]; then
-        version=$($java_cmd -version 2>&1 | head -1 | sed -n 's/.*version "1\.\([0-9]*\).*/\1/p')
+        if command -v timeout >/dev/null 2>&1; then
+            version=$(timeout 5 $java_cmd -version 2>&1 | head -1 | sed -n 's/.*version "1\.\([0-9]*\).*/\1/p')
+        elif command -v gtimeout >/dev/null 2>&1; then
+            version=$(gtimeout 5 $java_cmd -version 2>&1 | head -1 | sed -n 's/.*version "1\.\([0-9]*\).*/\1/p')
+        else
+            version=$($java_cmd -version 2>&1 | head -1 | sed -n 's/.*version "1\.\([0-9]*\).*/\1/p')
+        fi
     fi
     
     echo "${version:-0}"

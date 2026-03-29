@@ -22,6 +22,7 @@ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$scriptPath\config_manager.ps1"
 . "$scriptPath\java_manager.ps1"
 . "$scriptPath\process_manager.ps1"
+. "$scriptPath\data_import.ps1"
 
 # ============================================================================
 # Global Variables for Standalone Mode
@@ -163,6 +164,10 @@ function Invoke-StandaloneMode {
     Remove-Item "$configFile.bak" -ErrorAction SilentlyContinue
     Write-Info "Configuration completed"
     Write-Host ""
+
+    Write-Info "Post-config: importing default agentspec / skill data into $($Global:InstallDir)\data..."
+    Invoke-PostNacosConfigDataImportHook $Global:InstallDir
+    Write-Host ""
     
     # Start Nacos if auto-start is enabled
     if ($Global:AutoStart) {
@@ -189,8 +194,17 @@ function Invoke-StandaloneMode {
             Write-Host ""
             
             if ($Global:NacosPassword -and $Global:NacosPassword -ne "nacos") {
-                if (-not (Initialize-AdminPassword $Global:ServerPort $Global:ConsolePort $Global:Version $Global:NacosPassword)) {
-                    Write-Warn "Password initialization failed, you can change it manually after login"
+                Write-Info "Initializing admin password..."
+                if (Initialize-AdminPassword $Global:ServerPort $Global:ConsolePort $Global:Version $Global:NacosPassword) {
+                    Write-Info "Admin password initialized successfully"
+                    Write-Host ""
+                    Write-Info "Auto-Generated Admin Password:"
+                    Write-Host "  $($Global:NacosPassword)"
+                    Write-Host ""
+                } else {
+                    Write-Warn "Password initialization failed (may already be set previously)"
+                    # Clear password so it won't be shown in completion info
+                    $Global:NacosPassword = $null
                 }
             }
         } else {
@@ -200,9 +214,9 @@ function Invoke-StandaloneMode {
         # Print completion info
         $nacosMajor = $Global:Version.Split('.')[0]
         $consoleUrl = if ($nacosMajor -ge 3) {
-            "http://localhost:$($Global:ConsolePort)/index.html"
+            "http://localhost:$($Global:ConsolePort)"
         } else {
-            "http://localhost:$($Global:ServerPort)/nacos/index.html"
+            "http://localhost:$($Global:ServerPort)/nacos"
         }
         
         Show-CompletionInfo $Global:InstallDir $consoleUrl $Global:ServerPort $Global:ConsolePort $Global:Version "nacos" $Global:NacosPassword

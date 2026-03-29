@@ -22,6 +22,7 @@ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$scriptPath\config_manager.ps1"
 . "$scriptPath\java_manager.ps1"
 . "$scriptPath\process_manager.ps1"
+. "$scriptPath\data_import.ps1"
 
 # ============================================================================
 # Global Variables
@@ -276,6 +277,8 @@ function New-Cluster {
         }
         
         Remove-Item "$configFile.bak" -ErrorAction SilentlyContinue
+        Write-Info "  Importing default agentspec / skill data into $nodeDir\data..."
+        Invoke-PostNacosConfigDataImportHook $nodeDir
         
         $nacosMajor = $Global:Version.Split('.')[0]
         if ($nacosMajor -ge 3) {
@@ -330,7 +333,18 @@ function New-Cluster {
         
         # Initialize password on first node
         if ($Global:NacosPassword -and $Global:NacosPassword -ne "nacos") {
-            Initialize-AdminPassword $nodeMainPorts[0] $nodeConsolePorts[0] $Global:Version $Global:NacosPassword
+            Write-Info "Initializing admin password..."
+            if (Initialize-AdminPassword $nodeMainPorts[0] $nodeConsolePorts[0] $Global:Version $Global:NacosPassword) {
+                Write-Info "Admin password initialized successfully"
+                Write-Host ""
+                Write-Info "Auto-Generated Admin Password:"
+                Write-Host "  $($Global:NacosPassword)"
+                Write-Host ""
+            } else {
+                Write-Warn "Password initialization failed (may already be set previously)"
+                # Clear password so it won't be shown in completion info
+                $Global:NacosPassword = $null
+            }
         }
         
         # Print cluster info
@@ -407,9 +421,9 @@ function Show-ClusterInfo {
     
     for ($i = 0; $i -lt $MainPorts.Count; $i++) {
         if ($nacosMajor -ge 3) {
-            Write-Host "  Node $i`: http://${localIp}:$($ConsolePorts[$i])/index.html"
+            Write-Host "  Node $i`: http://${localIp}:$($ConsolePorts[$i])"
         } else {
-            Write-Host "  Node $i`: http://${localIp}:$($MainPorts[$i])/nacos/index.html"
+            Write-Host "  Node $i`: http://${localIp}:$($MainPorts[$i])/nacos"
         }
     }
     
@@ -603,6 +617,10 @@ function Join-ClusterMode {
     
     Remove-Item "$configFile.bak" -ErrorAction SilentlyContinue
     Write-Info "Node configured: main=$newMainPort, console=$newConsolePort"
+    Write-Host ""
+
+    Write-Info "Post-config: importing default agentspec / skill data into $newNodeDir\data..."
+    Invoke-PostNacosConfigDataImportHook $newNodeDir
     Write-Host ""
     
     # Update cluster.conf in existing nodes

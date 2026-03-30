@@ -31,6 +31,58 @@ _pm_is_windows_env() {
     esac
 }
 
+# Return first available PowerShell executable name.
+_pm_powershell_cmd() {
+    local c
+    for c in powershell powershell.exe pwsh pwsh.exe; do
+        if command -v "$c" >/dev/null 2>&1; then
+            printf '%s\n' "$c"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Resolve PID by listening TCP port.
+# Echo PID on success; return 0 when found.
+_pm_get_pid_by_listen_port() {
+    local port=$1
+    local pid=""
+
+    # Unix-like first
+    if command -v lsof >/dev/null 2>&1; then
+        pid=$(lsof -Pi :"$port" -sTCP:LISTEN -t 2>/dev/null | head -1)
+        if [ -n "$pid" ]; then
+            printf '%s\n' "$pid"
+            return 0
+        fi
+    fi
+
+    # Windows PowerShell (Git Bash / MSYS / Cygwin)
+    if _pm_is_windows_env; then
+        local ps_cmd
+        ps_cmd=$(_pm_powershell_cmd || true)
+        if [ -n "$ps_cmd" ]; then
+            pid=$("$ps_cmd" -Command "\$c=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess; if (\$c) { Write-Output \$c }" 2>/dev/null | tr -d '\r' | tail -n 1)
+            if [ -n "$pid" ]; then
+                printf '%s\n' "$pid"
+                return 0
+            fi
+        fi
+
+        # netstat fallback
+        if command -v netstat >/dev/null 2>&1; then
+            pid=$(netstat -ano 2>/dev/null | grep -E "[:.]${port}[[:space:]]" | grep -Ei "LISTEN|LISTENING" | awk '{print $NF}' | grep -E '^[0-9]+$' | head -1)
+            if [ -n "$pid" ]; then
+                printf '%s\n' "$pid"
+                return 0
+            fi
+        fi
+    fi
+
+    return 1
+}
+
 # Cross-platform process existence check.
 # Returns: 0 running, 1 not running
 is_process_running() {
@@ -41,9 +93,13 @@ is_process_running() {
     if ps -p "$pid" >/dev/null 2>&1; then
         return 0
     fi
-    if _pm_is_windows_env && command -v powershell >/dev/null 2>&1; then
-        powershell -Command "if (Get-Process -Id $pid -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >/dev/null 2>&1
-        return $?
+    if _pm_is_windows_env; then
+        local ps_cmd
+        ps_cmd=$(_pm_powershell_cmd || true)
+        if [ -n "$ps_cmd" ]; then
+            "$ps_cmd" -Command "if (Get-Process -Id $pid -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >/dev/null 2>&1
+            return $?
+        fi
     fi
     return 1
 }
@@ -145,34 +201,60 @@ initialize_admin_password() {
     fi
     
     local nacos_major=$(echo "$nacos_version" | cut -d. -f1)
-    local api_url
-    
-    # Determine password change API based on Nacos version
+    local -a api_urls=()
+    local -a methods=()
+    local retries=10
+    local i
+
     if [ "$nacos_major" -ge 3 ]; then
-        api_url="http://localhost:${console_port}/v3/auth/user/admin"
+        api_urls=(
+            "http://127.0.0.1:${console_port}/v3/auth/user/admin"
+            "http://localhost:${console_port}/v3/auth/user/admin"
+            "http://127.0.0.1:${console_port}/v3/auth/users/admin"
+            "http://localhost:${console_port}/v3/auth/users/admin"
+            "http://127.0.0.1:${console_port}/nacos/v3/auth/user/admin"
+            "http://localhost:${console_port}/nacos/v3/auth/user/admin"
+            "http://127.0.0.1:${console_port}/nacos/v3/auth/users/admin"
+            "http://localhost:${console_port}/nacos/v3/auth/users/admin"
+        )
+        methods=(POST PUT)
     else
-        api_url="http://localhost:${main_port}/nacos/v1/auth/users/admin"
+        api_urls=(
+            "http://127.0.0.1:${main_port}/nacos/v1/auth/users/admin"
+            "http://localhost:${main_port}/nacos/v1/auth/users/admin"
+        )
+        methods=(POST PUT)
     fi
-    
+
     print_detail "Initializing admin password..."
-    
-    # Call the password change API
-    local response
-    response=$(curl -w "\nHTTP_CODE:%{http_code}" -s -X POST "$api_url" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "password=${password}" 2>&1)
-    
-    # Extract HTTP code and body
-    local body=$(echo "$response" | sed '/HTTP_CODE:/d')
-    
-    # Check if response is successful
-    if echo "$body" | grep -q '"username"'; then
-        print_detail "Admin password initialized successfully"
-        return 0
-    else
-        print_warn "Failed to initialize password automatically"
-        return 1
-    fi
+
+    for ((i=0; i<retries; i++)); do
+        local method url response body http_code
+        for method in "${methods[@]}"; do
+            for url in "${api_urls[@]}"; do
+                response=$(curl --noproxy "*" --connect-timeout 2 --max-time 5 -w "\nHTTP_CODE:%{http_code}" -s -X "$method" "$url" \
+                    -H "Content-Type: application/x-www-form-urlencoded" \
+                    -d "password=${password}" 2>&1 || true)
+
+                body=$(echo "$response" | sed '/HTTP_CODE:/d')
+                http_code=$(echo "$response" | sed -n 's/^HTTP_CODE://p' | tail -n1)
+
+                # Consider success on known successful payloads or generic 2xx.
+                if echo "$body" | grep -Eq '"username"|success|\"code\"[[:space:]]*:[[:space:]]*0'; then
+                    print_detail "Admin password initialized successfully"
+                    return 0
+                fi
+                if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+                    print_detail "Admin password initialized successfully"
+                    return 0
+                fi
+            done
+        done
+        sleep 2
+    done
+
+    print_warn "Failed to initialize password automatically"
+    return 1
 }
 
 # ============================================================================
@@ -223,7 +305,7 @@ start_nacos_process() {
     # Try to find the PID (may take a moment for process to bind to port)
     local pid=""
     local retry_count=0
-    local max_retries=10
+    local max_retries=40
     
     while [ $retry_count -lt $max_retries ]; do
         sleep 1
@@ -232,8 +314,8 @@ start_nacos_process() {
             # Windows Git Bash often reports Windows path in java cmdline; fallback match by "nacos"
             pid=$(ps aux | grep -i "java" | grep -i "nacos" | grep -v grep | awk '{print $2}' | head -1)
         fi
-        if [ -z "$pid" ] && _pm_is_windows_env && [ -n "$main_port" ] && command -v powershell >/dev/null 2>&1; then
-            pid=$(powershell -Command "\$c=Get-NetTCPConnection -LocalPort $main_port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess; if (\$c) { Write-Output \$c }" 2>/dev/null | tr -d '\r' | tail -n 1)
+        if [ -z "$pid" ] && [ -n "$main_port" ]; then
+            pid=$(_pm_get_pid_by_listen_port "$main_port" || true)
         fi
         
         if [ -n "$pid" ] && is_process_running "$pid"; then

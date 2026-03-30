@@ -21,10 +21,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 source "$SCRIPT_DIR/java_manager.sh"
 
-_pm_debug() {
-    if [ "${VERBOSE:-false}" = true ]; then
-        echo "[DEBUG] $*" >&2
+_pm_is_windows_env() {
+    case "${OSTYPE:-}" in
+        cygwin|msys|win32) return 0 ;;
+    esac
+    case "$(uname -s 2>/dev/null)" in
+        CYGWIN*|MINGW*|MSYS*|Windows_NT) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Cross-platform process existence check.
+# Returns: 0 running, 1 not running
+is_process_running() {
+    local pid=$1
+    if [ -z "$pid" ]; then
+        return 1
     fi
+    if ps -p "$pid" >/dev/null 2>&1; then
+        return 0
+    fi
+    if _pm_is_windows_env && command -v powershell >/dev/null 2>&1; then
+        powershell -Command "if (Get-Process -Id $pid -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >/dev/null 2>&1
+        return $?
+    fi
+    return 1
 }
 
 # ============================================================================
@@ -70,18 +91,12 @@ wait_for_nacos_ready() {
         )
     fi
     
-    _pm_debug "wait_for_nacos_ready max_wait=${max_wait}s"
-    _pm_debug "health_urls=${health_urls[*]}"
-    _pm_debug "fallback_urls=${fallback_urls[*]}"
-    _pm_debug "HTTP_PROXY=${HTTP_PROXY:-<empty>} HTTPS_PROXY=${HTTPS_PROXY:-<empty>} NO_PROXY=${NO_PROXY:-<empty>}"
-
     while [ $wait_count -lt $max_wait ]; do
         local url
 
         # 1) strict readiness endpoint(s)
         for url in "${health_urls[@]}"; do
             if curl --noproxy "*" --connect-timeout 2 --max-time 3 -sf "$url" >/dev/null 2>&1; then
-                _pm_debug "Readiness OK via ${url}"
                 if [ "$VERBOSE" = true ]; then echo -ne "\r\033[K" >&2; fi
                 return 0
             fi
@@ -92,7 +107,6 @@ wait_for_nacos_ready() {
             local code
             code=$(curl --noproxy "*" --connect-timeout 2 --max-time 3 -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
             if [ "$code" != "000" ]; then
-                _pm_debug "Fallback endpoint responded (${code}) via ${url}; treat as started"
                 if [ "$VERBOSE" = true ]; then echo -ne "\r\033[K" >&2; fi
                 return 0
             fi
@@ -107,15 +121,6 @@ wait_for_nacos_ready() {
     done
     
     if [ "$VERBOSE" = true ]; then echo "" >&2; fi
-    _pm_debug "Health check timed out. Collecting diagnostics..."
-    if command -v netstat >/dev/null 2>&1; then
-        _pm_debug "Listening ports snapshot (8848/8080/9848):"
-        netstat -an 2>/dev/null | grep -E '[:.]8848[[:space:]]|[:.]8080[[:space:]]|[:.]9848[[:space:]]' >&2 || true
-    fi
-    if command -v ps >/dev/null 2>&1; then
-        _pm_debug "Java process snapshot:"
-        ps aux 2>/dev/null | grep -i java | grep -v grep >&2 || true
-    fi
     print_warn "Nacos health check timeout after ${max_wait}s" >&2
     print_warn "If you use a proxy, set NO_PROXY=localhost,127.0.0.1 and retry." >&2
     return 1
@@ -175,12 +180,13 @@ initialize_admin_password() {
 # ============================================================================
 
 # Start Nacos process
-# Parameters: install_dir, mode (standalone/cluster), use_derby (true/false)
+# Parameters: install_dir, mode (standalone/cluster), use_derby (true/false), main_port(optional)
 # Returns: PID on success, empty on failure
 start_nacos_process() {
     local install_dir=$1
     local mode=$2
     local use_derby=${3:-true}
+    local main_port=${4:-}
     
     if [ ! -d "$install_dir" ]; then
         print_error "Installation directory not found: $install_dir"
@@ -204,8 +210,6 @@ start_nacos_process() {
     # Start Nacos
     local startup_log="$install_dir/logs/nacos-setup-startup.log"
     mkdir -p "$install_dir/logs" 2>/dev/null || true
-    _pm_debug "Starting Nacos mode=${mode}, use_derby=${use_derby}, install_dir=${install_dir}"
-    _pm_debug "Startup log: ${startup_log}"
 
     if [ "$use_derby" = true ] && [ "$mode" = "cluster" ]; then
         bash "$install_dir/bin/startup.sh" -m "$mode" -p embedded >"$startup_log" 2>&1
@@ -228,9 +232,11 @@ start_nacos_process() {
             # Windows Git Bash often reports Windows path in java cmdline; fallback match by "nacos"
             pid=$(ps aux | grep -i "java" | grep -i "nacos" | grep -v grep | awk '{print $2}' | head -1)
         fi
+        if [ -z "$pid" ] && _pm_is_windows_env && [ -n "$main_port" ] && command -v powershell >/dev/null 2>&1; then
+            pid=$(powershell -Command "\$c=Get-NetTCPConnection -LocalPort $main_port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess; if (\$c) { Write-Output \$c }" 2>/dev/null | tr -d '\r' | tail -n 1)
+        fi
         
-        if [ -n "$pid" ] && ps -p $pid >/dev/null 2>&1; then
-            _pm_debug "Detected Nacos PID: $pid"
+        if [ -n "$pid" ] && is_process_running "$pid"; then
             echo "$pid"
             return 0
         fi
@@ -239,9 +245,8 @@ start_nacos_process() {
     done
     
     # Could not determine PID
-    _pm_debug "Could not determine PID after ${max_retries}s. Recent startup log:"
-    if [ -f "$startup_log" ]; then
-        tail -n 80 "$startup_log" >&2 || true
+    if [ "$VERBOSE" = true ] && [ -f "$startup_log" ]; then
+        print_warn "Could not determine Nacos PID after ${max_retries}s. Startup log: $startup_log" >&2
     fi
     echo ""
     return 1
@@ -258,17 +263,21 @@ stop_nacos_gracefully() {
     local pid=$1
     local timeout=${2:-10}
     
-    if [ -z "$pid" ] || ! ps -p $pid >/dev/null 2>&1; then
+    if [ -z "$pid" ] || ! is_process_running "$pid"; then
         return 0
     fi
     
     # Try graceful shutdown
-    kill $pid 2>/dev/null
+    if _pm_is_windows_env && command -v taskkill >/dev/null 2>&1; then
+        taskkill //PID "$pid" >/dev/null 2>&1 || true
+    else
+        kill "$pid" 2>/dev/null || true
+    fi
     
     # Wait for graceful shutdown
     local wait_count=0
     while [ $wait_count -lt $timeout ]; do
-        if ! ps -p $pid >/dev/null 2>&1; then
+        if ! is_process_running "$pid"; then
             return 0
         fi
         sleep 1
@@ -276,10 +285,14 @@ stop_nacos_gracefully() {
     done
     
     # Force kill if still running
-    kill -9 $pid 2>/dev/null
+    if _pm_is_windows_env && command -v taskkill >/dev/null 2>&1; then
+        taskkill //F //T //PID "$pid" >/dev/null 2>&1 || true
+    else
+        kill -9 "$pid" 2>/dev/null || true
+    fi
     sleep 1
     
-    ! ps -p $pid >/dev/null 2>&1
+    ! is_process_running "$pid"
 }
 
 # ============================================================================

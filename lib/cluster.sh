@@ -76,7 +76,7 @@ cleanup_on_exit() {
         local -a stopped_pids=()
         
         for pid in "${STARTED_PIDS[@]}"; do
-            if ps -p $pid >/dev/null 2>&1; then
+            if is_process_running "$pid"; then
                 stop_nacos_gracefully $pid
                 stopped_pids+=("$pid")
                 stopped_count=$((stopped_count + 1))
@@ -123,7 +123,7 @@ start_cluster_node() {
     fi
     
     # Start the node
-    local pid=$(start_nacos_process "$node_dir" "cluster" "$use_derby")
+    local pid=$(start_nacos_process "$node_dir" "cluster" "$use_derby" "$main_port")
     
     if [ -z "$pid" ]; then
         print_error "Failed to start node $node_name" >&2
@@ -139,8 +139,8 @@ start_cluster_node() {
         return 0
     else
         print_error "Node $node_name startup timeout" >&2
-        if [ -n "$pid" ] && ps -p $pid >/dev/null 2>&1; then
-            kill -9 $pid 2>/dev/null || true
+        if [ -n "$pid" ] && is_process_running "$pid"; then
+            stop_nacos_gracefully "$pid" 2 >/dev/null 2>&1 || true
         fi
         return 1
     fi
@@ -414,7 +414,7 @@ create_cluster() {
             local -a verified_pids=()
             for idx in "${!STARTED_PIDS[@]}"; do
                 local pid="${STARTED_PIDS[$idx]}"
-                if ps -p $pid >/dev/null 2>&1; then
+                if is_process_running "$pid"; then
                     verified_pids+=($pid)
                 else
                     print_warn "Node $idx (PID: $pid) is not running"
@@ -435,7 +435,7 @@ create_cluster() {
                 
                 for idx in "${!STARTED_PIDS[@]}"; do
                     local pid="${STARTED_PIDS[$idx]}"
-                    if ps -p $pid >/dev/null 2>&1; then
+                    if is_process_running "$pid"; then
                         running_count=$((running_count + 1))
                     else
                         stopped_nodes+=("Node $idx (PID: $pid)")
@@ -544,9 +544,9 @@ clean_existing_cluster() {
     for node_dir in "${node_dirs[@]}"; do
         local pid=$(ps aux | grep "java" | grep "$node_dir" | grep -v grep | awk '{print $2}' | head -1)
         
-        if [ -n "$pid" ] && ps -p $pid >/dev/null 2>&1; then
+        if [ -n "$pid" ] && is_process_running "$pid"; then
             print_detail "Stopping $(basename "$node_dir") (PID: $pid)"
-            kill $pid 2>/dev/null || true
+            stop_nacos_gracefully "$pid" 2 >/dev/null 2>&1 || true
         fi
     done
     
@@ -556,8 +556,8 @@ clean_existing_cluster() {
     for node_dir in "${node_dirs[@]}"; do
         local pid=$(ps aux | grep "java" | grep "$node_dir" | grep -v grep | awk '{print $2}' | head -1)
         
-        if [ -n "$pid" ] && ps -p $pid >/dev/null 2>&1; then
-            kill -9 $pid 2>/dev/null || true
+        if [ -n "$pid" ] && is_process_running "$pid"; then
+            stop_nacos_gracefully "$pid" 2 >/dev/null 2>&1 || true
         fi
     done
     
@@ -739,7 +739,7 @@ join_cluster() {
                 exit 0
             else
                 print_info "Press Ctrl+C to stop node"
-                while ps -p $pid >/dev/null 2>&1; do
+                while is_process_running "$pid"; do
                     sleep 5
                 done
             fi
@@ -815,13 +815,13 @@ leave_cluster() {
     # Stop node
     local pid=$(ps aux | grep "java" | grep "$target_node_dir" | grep -v grep | awk '{print $2}' | head -1)
     
-    if [ -n "$pid" ] && ps -p $pid >/dev/null 2>&1; then
+    if [ -n "$pid" ] && is_process_running "$pid"; then
         print_info "Stopping node (PID: $pid)"
-        kill $pid 2>/dev/null
+        stop_nacos_gracefully "$pid" 2 >/dev/null 2>&1 || true
         sleep 3
         
-        if ps -p $pid >/dev/null 2>&1; then
-            kill -9 $pid 2>/dev/null
+        if is_process_running "$pid"; then
+            stop_nacos_gracefully "$pid" 2 >/dev/null 2>&1 || true
         fi
     fi
     

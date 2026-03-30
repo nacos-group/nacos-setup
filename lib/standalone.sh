@@ -66,7 +66,7 @@ cleanup_on_exit() {
     fi
     
     # Stop Nacos if running
-    if [ -n "$STARTED_NACOS_PID" ] && ps -p $STARTED_NACOS_PID >/dev/null 2>&1; then
+    if [ -n "$STARTED_NACOS_PID" ] && is_process_running "$STARTED_NACOS_PID"; then
         echo ""
         print_info "Cleaning up: Stopping Nacos (PID: $STARTED_NACOS_PID)..."
         
@@ -220,7 +220,7 @@ run_standalone_mode() {
         
         step_simple_begin 7 $TOTAL_STEPS "Starting Nacos"
         print_detail "Starting Nacos in standalone mode..."
-        local pid=$(start_nacos_process "$INSTALL_DIR" "standalone" "false")
+        local pid=$(start_nacos_process "$INSTALL_DIR" "standalone" "false" "$SERVER_PORT")
         if [ -z "$pid" ]; then
             print_warn "Could not determine Nacos PID"
         else
@@ -272,11 +272,19 @@ run_standalone_mode() {
             echo ""
             
             if [ -n "$STARTED_NACOS_PID" ]; then
-                while ps -p $STARTED_NACOS_PID >/dev/null 2>&1; do
+                while is_process_running "$STARTED_NACOS_PID"; do
                     sleep 5
                 done
                 print_warn "Nacos process terminated unexpectedly"
                 STARTED_NACOS_PID=""
+            else
+                # Windows Git Bash may fail to resolve Java PID; keep terminal attached
+                # so users launched from shortcut don't lose the session immediately.
+                print_warn "PID not detected on this platform. Nacos may still be running."
+                print_info "Press Ctrl+C to exit this terminal (Nacos will keep running)."
+                while true; do
+                    sleep 60
+                done
             fi
         fi
     else

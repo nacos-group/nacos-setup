@@ -396,6 +396,26 @@ A:
 2. 检查端口是否冲突
 3. 查看日志：`~/ai-infra/nacos/cluster/CLUSTER_ID/*/logs/startup.log`
 
+### Q: Windows 上启动后 Git Bash 窗口自动关闭，或显示无法获取 PID？
+
+A:
+1. 建议优先使用 `--daemon` 启动（脚本启动完成后退出，Nacos 在后台运行）：
+
+```bash
+nacos-setup --daemon
+```
+
+2. 从当前版本开始，Windows 会优先通过端口反查 PID（`Get-NetTCPConnection`），不再只依赖 `ps | grep`。
+3. 若仍异常，请检查是否可用 PowerShell 命令：
+
+```powershell
+Get-NetTCPConnection -LocalPort 8848 -State Listen
+```
+
+4. 启动日志可在以下位置查看：
+- 单机：`~/ai-infra/nacos/standalone/nacos-<version>/logs/nacos-setup-startup.log`
+- 集群：`~/ai-infra/nacos/cluster/<cluster-id>/*/logs/nacos-setup-startup.log`
+
 ### Q: 如何切换到外部数据库？
 
 A:

@@ -9,9 +9,7 @@
 # Interactive (Y/n): (1) skill-scanner stack, (2) uv bootstrap when missing, (3) uv python 3.10 when missing.
 # stdin may be a pipe (curl | bash): prompt is read from /dev/tty when available; no usable TTY skips.
 # After Y: missing uv is bootstrapped via install.sh (curl/wget/fetch, else Python urllib / ruby / node); missing Python 3.10+ uses `uv python install 3.10`.
-# Simple UI (VERBOSE not true): installer uses UV_PRINT_QUIET; on Unix, uv uses UV_NO_PROGRESS + discarded
-# stdio where safe. On Git Bash/MSYS, UV_NO_PROGRESS + full discard can break `uv python install` / venv / pip
-# while the same commands succeed under -x — so Windows skips UV_NO_PROGRESS for those subcommands.
+# Simple UI (VERBOSE not true): installer uses UV_PRINT_QUIET; uv uses UV_NO_PROGRESS, -q/-qq, and stdout/stderr discarded where safe so progress spinners do not flood the console.
 
 SKILL_SCANNER_PYPI_PACKAGE="cisco-ai-skill-scanner"
 MIN_NACOS_VERSION_FOR_SKILL_SCANNER="3.2.0"
@@ -134,35 +132,6 @@ _skill_scanner_trace() {
 # Simple UI (step_simple_*): suppress uv/installer progress bars and package spinners.
 _skill_scanner_uv_use_quiet_output() {
     [ "${VERBOSE:-false}" != true ]
-}
-
-# Run uv subprocess for simplified UI: Windows (Git Bash) must not combine UV_NO_PROGRESS with
-# stdout+stderr discarded — uv then often fails python install with no visible error.
-_skill_scanner_runas_uv_simple_quiet() {
-    if _skill_scanner_is_windows_env; then
-        _skill_scanner_runas_target_user "$@"
-    else
-        _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 "$@"
-    fi
-}
-
-# Same for venv lines that optionally set UV_LINK_MODE=copy (non-Windows also sets UV_NO_PROGRESS=1).
-_skill_scanner_runas_uv_venv_capture() {
-    local logf=$1 use_copy=$2
-    shift 2
-    if _skill_scanner_is_windows_env; then
-        if [ "$use_copy" = true ]; then
-            _skill_scanner_runas_target_user env UV_LINK_MODE=copy "$@" >"$logf" 2>&1
-        else
-            _skill_scanner_runas_target_user "$@" >"$logf" 2>&1
-        fi
-    else
-        if [ "$use_copy" = true ]; then
-            _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 UV_LINK_MODE=copy "$@" >"$logf" 2>&1
-        else
-            _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 "$@" >"$logf" 2>&1
-        fi
-    fi
 }
 
 # Add skill-scanner to PATH if installed via pip/uv but not in PATH
@@ -423,8 +392,12 @@ _ensure_python_310_plus_with_uv() {
     # Do not use `uv -q python install`: on some uv versions -q can return before the
     # interpreter is fully materialized, and a later `uv -q venv --python <path>` then fails
     # with "No interpreter found" while verbose (non -q) works. Keep UI quiet via redirects + UV_NO_PROGRESS only.
+    # On Windows (MSYS / Git Bash) redirecting both stdout and stderr to /dev/null can cause
+    # the native uv.exe to fail; use a temp log file (same pattern as _create_skill_scanner_venv_with_uv).
     if _skill_scanner_uv_use_quiet_output; then
-        if _skill_scanner_runas_uv_simple_quiet uv python install 3.10 >/dev/null 2>&1; then
+        local _py_logf="${TMPDIR:-/tmp}/nacos-setup-uv-python.$$.log"
+        : >"$_py_logf" 2>/dev/null || _py_logf=/dev/null
+        if _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 uv python install 3.10 >"$_py_logf" 2>&1; then
             py_install_ok=1
         fi
     else
@@ -441,7 +414,16 @@ _ensure_python_310_plus_with_uv() {
     if [ -n "$py_exe" ] && _skill_scanner_runas_target_user "$py_exe" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
         print_info "Python 3.10 ready: $py_exe" >&2
         printf '%s\n' "$py_exe"
+        if [ -n "${_py_logf:-}" ] && [ "$_py_logf" != /dev/null ]; then rm -f "$_py_logf"; fi
         return 0
+    fi
+
+    if [ -n "${_py_logf:-}" ] && [ "$_py_logf" != /dev/null ] && [ -s "$_py_logf" ]; then
+        print_warn "uv python install output:" >&2
+        while IFS= read -r _py_log_line || [ -n "$_py_log_line" ]; do
+            print_warn "  $_py_log_line" >&2
+        done < "$_py_logf"
+        rm -f "$_py_logf"
     fi
 
     return 1
@@ -487,20 +469,20 @@ _create_skill_scanner_venv_with_uv() {
 
     if _skill_scanner_uv_use_quiet_output; then
         : >"$logf" 2>/dev/null || logf=/dev/null
-        _skill_scanner_runas_uv_venv_capture "$logf" false uv venv --no-project --python "$py_for_venv" "$venv_dir"
+        _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 uv venv --no-project --python "$py_for_venv" "$venv_dir" >"$logf" 2>&1
         rc=$?
         # Incomplete or conflicting directory from a previous run — one retry with --clear.
         if [ "$rc" -ne 0 ] && [ -d "$venv_dir" ]; then
-            _skill_scanner_runas_uv_venv_capture "$logf" false uv venv --no-project --clear --python "$py_for_venv" "$venv_dir"
+            _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 uv venv --no-project --clear --python "$py_for_venv" "$venv_dir" >"$logf" 2>&1
             rc=$?
         fi
         # Hardlinks sometimes fail on overlay/virt FS — retry with copy link mode.
         if [ "$rc" -ne 0 ]; then
-            _skill_scanner_runas_uv_venv_capture "$logf" true uv venv --no-project --python "$py_for_venv" "$venv_dir"
+            _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 UV_LINK_MODE=copy uv venv --no-project --python "$py_for_venv" "$venv_dir" >"$logf" 2>&1
             rc=$?
         fi
         if [ "$rc" -ne 0 ] && [ -d "$venv_dir" ]; then
-            _skill_scanner_runas_uv_venv_capture "$logf" true uv venv --no-project --clear --python "$py_for_venv" "$venv_dir"
+            _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 UV_LINK_MODE=copy uv venv --no-project --clear --python "$py_for_venv" "$venv_dir" >"$logf" 2>&1
             rc=$?
         fi
         if [ "$rc" -ne 0 ]; then
@@ -531,11 +513,7 @@ _create_skill_scanner_venv_with_uv() {
 _install_skill_scanner_uv_in_venv() {
     local venv_python=$1
     if _skill_scanner_uv_use_quiet_output; then
-        if _skill_scanner_is_windows_env; then
-            _skill_scanner_runas_target_user uv pip install --python "$venv_python" "$SKILL_SCANNER_PYPI_PACKAGE" >/dev/null 2>&1
-        else
-            _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 uv -qq pip install --python "$venv_python" "$SKILL_SCANNER_PYPI_PACKAGE" >/dev/null 2>&1
-        fi
+        _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 uv -qq pip install --python "$venv_python" "$SKILL_SCANNER_PYPI_PACKAGE" >/dev/null 2>&1
     else
         _skill_scanner_runas_target_user uv pip install --python "$venv_python" "$SKILL_SCANNER_PYPI_PACKAGE"
     fi

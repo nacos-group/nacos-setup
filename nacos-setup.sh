@@ -540,6 +540,8 @@ main() {
             exit 0
         fi
         if [ "$_bundled_jre_status" -ne 0 ]; then
+            print_error "Failed to set up bundled JDK 17. Cannot continue Nacos installation."
+            print_info  "You can manually install JDK 17, set JAVA_HOME, and re-run nacos-setup."
             exit 1
         fi
     fi

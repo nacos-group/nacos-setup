@@ -88,7 +88,7 @@ _bundled_jdk_resolve_url() {
     arch=$(_bundled_jdk_machine_arch)
 
     if [ "$os" = unknown ] || [ "$arch" = unknown ]; then
-        print_error "Cannot detect OS/arch for bundled JDK (os=$os arch=$arch)."
+        print_error "Cannot detect OS/arch for bundled JDK (os=$os arch=$arch)." >&2
         return 1
     fi
 
@@ -96,15 +96,15 @@ _bundled_jdk_resolve_url() {
     case "${os}-${arch}" in
         darwin-amd64 | darwin-arm64 | linux-amd64 | windows-amd64) ;;
         linux-arm64)
-            print_error "No bundled JDK 17 package for linux-arm64. Install JDK 17 manually and retry."
+            print_error "No bundled JDK 17 package for linux-arm64. Install JDK 17 manually and retry." >&2
             return 1
             ;;
         windows-arm64)
-            print_error "No bundled JDK 17 package for windows-arm64. Install JDK 17 manually and retry."
+            print_error "No bundled JDK 17 package for windows-arm64. Install JDK 17 manually and retry." >&2
             return 1
             ;;
         *)
-            print_error "No bundled JDK 17 package for ${os}-${arch}. Install JDK 17 manually and retry."
+            print_error "No bundled JDK 17 package for ${os}-${arch}. Install JDK 17 manually and retry." >&2
             return 1
             ;;
     esac
@@ -184,34 +184,36 @@ _bundled_jdk_acquire_zip() {
 
     if [ -f "$cached_file" ] && [ -s "$cached_file" ]; then
         if unzip -t "$cached_file" >/dev/null 2>&1; then
-            print_detail "Found cached JDK package: $cached_file"
+            print_detail "Found cached JDK package: $cached_file" >&2
             printf '%s\n' "$cached_file"
             return 0
         fi
-        print_warn "Cached JDK archive is invalid, re-downloading..."
+        print_warn "Cached JDK archive is invalid, re-downloading..." >&2
         rm -f "$cached_file"
     fi
 
-    print_detail "Downloading JDK 17: $url"
-    if [ "$VERBOSE" = true ]; then echo ""; fi
+    print_detail "Downloading JDK 17: $url" >&2
+    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
 
     local curl_jdk_flag="-s"
     if [ "$VERBOSE" = true ]; then curl_jdk_flag="-#"; fi
     if ! curl -fL $curl_jdk_flag -o "$cached_file" "$url"; then
         if [ "$VERBOSE" = true ]; then echo "" >&2; fi
-        print_error "Failed to download JDK 17."
+        print_error "Failed to download JDK 17." >&2
         rm -f "$cached_file" 2>/dev/null || true
         return 1
     fi
-    if [ "$VERBOSE" = true ]; then echo ""; fi
+    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
 
     if ! unzip -t "$cached_file" >/dev/null 2>&1; then
-        print_error "Downloaded file is not a valid zip."
+        print_error "Downloaded file is not a valid zip: $cached_file" >&2
+        print_error "The file may be corrupted or the download URL may be invalid." >&2
+        print_info  "URL: $url" >&2
         rm -f "$cached_file" 2>/dev/null || true
         return 1
     fi
 
-    print_detail "Download completed: $zip_name"
+    print_detail "Download completed: $zip_name" >&2
     printf '%s\n' "$cached_file"
     return 0
 }

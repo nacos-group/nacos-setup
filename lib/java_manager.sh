@@ -32,7 +32,7 @@ search_java_installation() {
     local advanced_mode=${2:-false}
     local os_type=$(detect_os_arch)
     
-    print_info "Searching for Java installation (OS: $os_type, required: Java ${required_version}+)..." >&2
+    print_detail "Searching for Java installation (OS: $os_type, required: Java ${required_version}+)..." >&2
     
     # Get search paths into array
     local java_search_paths=()
@@ -67,21 +67,22 @@ search_java_installation() {
     
     # If only one suitable Java found
     if [ ${#suitable_javas[@]} -eq 1 ]; then
-        print_info "Found suitable Java: ${suitable_javas[0]} (version: ${suitable_versions[0]})" >&2
+        print_detail "Found suitable Java: ${suitable_javas[0]} (version: ${suitable_versions[0]})" >&2
         echo "${suitable_javas[0]}"
         return 0
     fi
     
     # Multiple suitable Java versions found
-    echo "" >&2
-    print_info "Found multiple suitable Java installations:" >&2
-    echo "" >&2
+    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
+    print_detail "Found multiple suitable Java installations:" >&2
+    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
     
-    for i in "${!suitable_javas[@]}"; do
-        echo "  [$((i+1))] Java ${suitable_versions[$i]} - ${suitable_javas[$i]}" >&2
-    done
-    
-    echo "" >&2
+    if [ "$VERBOSE" = true ]; then
+        for i in "${!suitable_javas[@]}"; do
+            echo "  [$((i+1))] Java ${suitable_versions[$i]} - ${suitable_javas[$i]}" >&2
+        done
+        echo "" >&2
+    fi
     
     # If not in advanced mode, auto-select the highest version
     if [ "$advanced_mode" = false ]; then
@@ -93,7 +94,7 @@ search_java_installation() {
                 max_idx=$i
             fi
         done
-        print_info "Auto-selecting highest version: Java $max_ver" >&2
+        print_detail "Auto-selecting highest version: Java $max_ver" >&2
         echo "${suitable_javas[$max_idx]}"
         return 0
     fi
@@ -112,7 +113,7 @@ search_java_installation() {
                     max_idx=$i
                 fi
             done
-            print_info "Selected: Java $max_ver - ${suitable_javas[$max_idx]}" >&2
+            print_detail "Selected: Java $max_ver - ${suitable_javas[$max_idx]}" >&2
             echo "${suitable_javas[$max_idx]}"
             return 0
         fi
@@ -120,7 +121,7 @@ search_java_installation() {
         # Validate input
         if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le ${#suitable_javas[@]} ]; then
             local idx=$((selection-1))
-            print_info "Selected: Java ${suitable_versions[$idx]} - ${suitable_javas[$idx]}" >&2
+            print_detail "Selected: Java ${suitable_versions[$idx]} - ${suitable_javas[$idx]}" >&2
             echo "${suitable_javas[$idx]}"
             return 0
         else
@@ -205,7 +206,7 @@ check_java_requirements() {
         local nacos_major=$(echo "$nacos_version" | cut -d. -f1)
         if [ "$nacos_major" -ge 3 ]; then
             required_java_version=17
-            print_info "Nacos $nacos_version requires Java 17 or later"
+            print_detail "Nacos $nacos_version requires Java 17 or later"
         fi
     fi
     
@@ -217,22 +218,22 @@ check_java_requirements() {
     if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ]; then
         JAVA_CMD="$JAVA_HOME/bin/java"
         JAVA_VERSION=$(get_java_version "$JAVA_CMD")
-        print_info "Found Java from JAVA_HOME: $JAVA_HOME (version: $JAVA_VERSION)"
+        print_detail "Found Java from JAVA_HOME: $JAVA_HOME (version: $JAVA_VERSION)"
         
         if [ "$JAVA_VERSION" -lt "$required_java_version" ]; then
             print_warn "Java $JAVA_VERSION in JAVA_HOME is below required version $required_java_version"
-            print_info "Searching for a suitable Java version..."
+            print_detail "Searching for a suitable Java version..."
             JAVA_CMD=""
         fi
     # Try PATH
     elif command -v java &> /dev/null; then
         JAVA_CMD="java"
         JAVA_VERSION=$(get_java_version "$JAVA_CMD")
-        print_info "Found Java in PATH (version: $JAVA_VERSION)"
+        print_detail "Found Java in PATH (version: $JAVA_VERSION)"
         
         if [ "$JAVA_VERSION" -lt "$required_java_version" ]; then
             print_warn "Java $JAVA_VERSION in PATH is below required version $required_java_version"
-            print_info "Searching for a suitable Java version..."
+            print_detail "Searching for a suitable Java version..."
             JAVA_CMD=""
         fi
     fi
@@ -276,8 +277,8 @@ check_java_requirements() {
             # Found suitable Java
             JAVA_VERSION=$(get_java_version "$JAVA_CMD")
             export JAVA_HOME="$(dirname $(dirname $JAVA_CMD))"
-            print_info "Found suitable Java: $JAVA_CMD (version: $JAVA_VERSION)"
-            print_info "Set JAVA_HOME to: $JAVA_HOME"
+            print_detail "Found suitable Java: $JAVA_CMD (version: $JAVA_VERSION)"
+            print_detail "Set JAVA_HOME to: $JAVA_HOME"
         fi
     fi
     
@@ -287,7 +288,7 @@ check_java_requirements() {
         return 1
     fi
     
-    print_info "Java version: $JAVA_VERSION - OK"
+    print_detail "Java version: $JAVA_VERSION - OK"
     return 0
 }
 

@@ -1,5 +1,5 @@
 # Nacos Setup Installer for Windows (PowerShell)
-# Installs nacos-setup (default) or nacos-cli (with -cli flag)
+# Installs nacos-setup + nacos-cli (default) or nacos-cli only (with -cli flag)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -202,28 +202,9 @@ $SetupScriptName = "nacos-setup.ps1"
 $SetupCmdName    = "nacos-setup.cmd"
 
 # =============================
-# Main
+# nacos-cli Installation Function
 # =============================
-
-if ($isAdmin) {
-    Write-Warn "Running as Administrator detected"
-    Write-Info "Installing to user directory: $realUserProfile"
-}
-
-Ensure-Directory $CacheDir
-
-if ($InstallCli) {
-    # =============================
-    # Install nacos-cli
-    # =============================
-    Write-Info "Installing nacos-cli (use 'nacos-cli --help' for usage)"
-
-    if (Test-Path $InstallDir) {
-        Write-Warn "Removing existing nacos-cli installation at $InstallDir"
-        Remove-Item -Recurse -Force $InstallDir
-    }
-    Ensure-Directory $InstallDir
-
+function Install-NacosCli {
     Write-Info "Preparing to install nacos-cli version $Global:NacosCliVersion..."
     $os          = "windows"
     $arch        = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "386" }
@@ -247,22 +228,45 @@ if ($InstallCli) {
     if (-not $binaryPath) {
         Write-ErrorMsg "Binary not found in package. Expected: $expected"
         Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { Write-Info "  $($_.FullName)" }
-        throw "Binary file not found in package"
+        Remove-Item -Recurse -Force $extractDir
+        return $false
     }
+
+    if (Test-Path $InstallDir) {
+        Write-Warn "Removing existing nacos-cli installation at $InstallDir"
+        Remove-Item -Recurse -Force $InstallDir
+    }
+    Ensure-Directory $InstallDir
 
     Copy-Item -Path $binaryPath.FullName -Destination (Join-Path $InstallDir $BinName) -Force
     Add-ToUserPath $InstallDir
     Remove-Item -Recurse -Force $extractDir
-    Refresh-SessionPath
 
     Write-Host ""
-    Write-Success "nacos-cli installed successfully!"
+    Write-Success "nacos-cli $Global:NacosCliVersion installed successfully!"
     Write-Info "  Location: $InstallDir\$BinName"
     Write-Host ""
+    return $true
+}
+
+# =============================
+# Main
+# =============================
+
+if ($isAdmin) {
+    Write-Warn "Running as Administrator detected"
+    Write-Info "Installing to user directory: $realUserProfile"
+}
+
+Ensure-Directory $CacheDir
+
+if ($InstallCli) {
+    # --cli: Install nacos-cli only
+    Write-Info "Installing nacos-cli only (use 'nacos-cli --help' for usage)"
+    Install-NacosCli
+    Refresh-SessionPath
 } else {
-    # =============================
-    # Install nacos-setup
-    # =============================
+    # Default: Install nacos-setup + nacos-cli
     Write-Info "Installing nacos-setup (use 'nacos-setup --help' for usage)"
 
     $SetupInstallDir = Join-Path $SetupRootDir $Global:NacosSetupVersion
@@ -280,6 +284,12 @@ if ($InstallCli) {
             Write-Success "nacos-setup already installed."
             Write-Info "  Location: $SetupRootDir\$SetupCmdName"
             Write-Host ""
+
+            # Also install nacos-cli
+            Write-Info "Bundling nacos-cli..."
+            if (-not (Install-NacosCli)) {
+                Write-Warn "nacos-cli installation failed, but nacos-setup is ready"
+            }
             return
         }
         Write-Warn "nacos-setup directory exists but script is missing. Reinstalling..."
@@ -333,4 +343,10 @@ if ($InstallCli) {
     Write-Success "nacos-setup installed successfully!"
     Write-Info "  Location: $SetupRootDir\$SetupCmdName"
     Write-Host ""
+
+    # Also install nacos-cli (bundled by default)
+    Write-Info "Bundling nacos-cli..."
+    if (-not (Install-NacosCli)) {
+        Write-Warn "nacos-cli installation failed, but nacos-setup is ready"
+    }
 }

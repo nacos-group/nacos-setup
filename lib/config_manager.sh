@@ -382,22 +382,24 @@ configure_standalone_security() {
         IDENTITY_VALUE=$(generate_secret_key | cut -c1-16)
         NACOS_PASSWORD=$(generate_password)
         
-        echo "" >&2
-        print_info "====================================" >&2
-        print_info "Auto-Generated Security Configuration" >&2
-        print_info "====================================" >&2
-        echo "" >&2
-        echo "JWT Token Secret Key:" >&2
-        echo "  $TOKEN_SECRET" >&2
-        echo "" >&2
-        echo "Server Identity Key:" >&2
-        echo "  $IDENTITY_KEY" >&2
-        echo "" >&2
-        echo "Server Identity Value:" >&2
-        echo "  $IDENTITY_VALUE" >&2
-        echo "" >&2
-        print_info "These credentials will be automatically configured" >&2
-        print_info "Admin password will be set after Nacos starts" >&2
+        if [ "$VERBOSE" = true ]; then
+            echo "" >&2
+            print_info "====================================" >&2
+            print_info "Auto-Generated Security Configuration" >&2
+            print_info "====================================" >&2
+            echo "" >&2
+            echo "JWT Token Secret Key:" >&2
+            echo "  $TOKEN_SECRET" >&2
+            echo "" >&2
+            echo "Server Identity Key:" >&2
+            echo "  $IDENTITY_KEY" >&2
+            echo "" >&2
+            echo "Server Identity Value:" >&2
+            echo "  $IDENTITY_VALUE" >&2
+            echo "" >&2
+            print_info "These credentials will be automatically configured" >&2
+            print_info "Admin password will be set after Nacos starts" >&2
+        fi
     else
         # Advanced mode: interactive prompts
         print_info "" >&2
@@ -455,34 +457,36 @@ configure_cluster_security() {
     local advanced_mode=${2:-false}
     local share_properties="$cluster_dir/share.properties"
     
-    echo "" >&2
+    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
     
     if [ "$advanced_mode" = false ]; then
         # Simplified mode: auto-generate all security credentials
-        print_info "Simplified mode: Auto-generating shared security keys for cluster..." >&2
+        print_detail "Simplified mode: Auto-generating shared security keys for cluster..." >&2
         
         TOKEN_SECRET=$(generate_secret_key)
         IDENTITY_KEY="nacos_cluster_$(date +%s)"
         IDENTITY_VALUE=$(generate_secret_key | cut -c1-16)
         NACOS_PASSWORD=$(generate_password)
         
-        echo "" >&2
-        print_info "===========================================" >&2
-        print_info "Auto-Generated Cluster Security Configuration" >&2
-        print_info "===========================================" >&2
-        echo "" >&2
-        echo "JWT Token Secret Key:" >&2
-        echo "  $TOKEN_SECRET" >&2
-        echo "" >&2
-        echo "Server Identity Key:" >&2
-        echo "  $IDENTITY_KEY" >&2
-        echo "" >&2
-        echo "Server Identity Value:" >&2
-        echo "  $IDENTITY_VALUE" >&2
-        echo "" >&2
-        print_info "These credentials will be shared across all cluster nodes" >&2
-        print_info "Admin password will be set after cluster startup" >&2
-        echo "" >&2
+        if [ "$VERBOSE" = true ]; then
+            echo "" >&2
+            print_info "===========================================" >&2
+            print_info "Auto-Generated Cluster Security Configuration" >&2
+            print_info "===========================================" >&2
+            echo "" >&2
+            echo "JWT Token Secret Key:" >&2
+            echo "  $TOKEN_SECRET" >&2
+            echo "" >&2
+            echo "Server Identity Key:" >&2
+            echo "  $IDENTITY_KEY" >&2
+            echo "" >&2
+            echo "Server Identity Value:" >&2
+            echo "  $IDENTITY_VALUE" >&2
+            echo "" >&2
+            print_info "These credentials will be shared across all cluster nodes" >&2
+            print_info "Admin password will be set after cluster startup" >&2
+            echo "" >&2
+        fi
     else
         # Advanced mode: allow user to customize
         print_info "===========================================" >&2
@@ -546,8 +550,8 @@ nacos.core.auth.server.identity.value=$IDENTITY_VALUE
 admin.password=$NACOS_PASSWORD
 EOF
     
-    print_info "Security configuration saved to: $share_properties" >&2
-    echo "" >&2
+    print_detail "Security configuration saved to: $share_properties" >&2
+    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
 }
 
 # ============================================================================

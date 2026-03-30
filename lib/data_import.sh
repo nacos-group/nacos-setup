@@ -13,7 +13,9 @@ DEFAULT_AGENTSPEC_DATA_URL="${NACOS_SETUP_AGENTSPEC_DATA_URL:-https://download.n
 NACOS_DATA_CACHE_DIR="${NACOS_DATA_CACHE_DIR:-${NACOS_CACHE_DIR:-$HOME/.nacos/cache}/data}"
 
 _data_import_trace() {
-    printf '%s\n' "[nacos-setup/data-import] $*" >&2
+    if [ "${VERBOSE:-false}" = true ]; then
+        printf '%s\n' "[nacos-setup/data-import] $*" >&2
+    fi
 }
 
 _data_import_skip_requested() {
@@ -54,9 +56,11 @@ _download_default_data_archive() {
         rm -f "$cached_file"
     fi
 
-    print_info "Downloading ${archive_name} from ${archive_url}" >&2
-    if curl -fL --retry 3 -# -o "$cached_file" "$archive_url" >&2; then
-        echo "" >&2
+    print_detail "Downloading ${archive_name} from ${archive_url}" >&2
+    local curl_data_flag="-s"
+    if [ "${VERBOSE:-false}" = true ]; then curl_data_flag="-#"; fi
+    if curl -fL --retry 3 $curl_data_flag -o "$cached_file" "$archive_url" >&2; then
+        if [ "${VERBOSE:-false}" = true ]; then echo "" >&2; fi
         if unzip -t "$cached_file" >/dev/null 2>&1; then
             echo "$cached_file"
             return 0
@@ -66,7 +70,7 @@ _download_default_data_archive() {
         return 1
     fi
 
-    echo "" >&2
+    if [ "${VERBOSE:-false}" = true ]; then echo "" >&2; fi
     print_warn "Failed to download ${archive_name} from ${archive_url}"
     rm -f "$cached_file"
     return 1
@@ -87,13 +91,13 @@ _import_default_data_archive() {
     }
 
     if ! _data_import_force_requested && [ -f "$marker_file" ] && grep -Fxq "$archive_url" "$marker_file" 2>/dev/null; then
-        print_info "${archive_name} already imported into ${data_dir}, skipping"
+        print_detail "${archive_name} already imported into ${data_dir}, skipping"
         return 0
     fi
 
     archive_file=$(_download_default_data_archive "$archive_name" "$archive_url") || return 0
 
-    print_info "Copying ${archive_name}.zip into ${data_dir}"
+    print_detail "Copying ${archive_name}.zip into ${data_dir}"
     if cp "$archive_file" "$target_archive" 2>/dev/null; then
         printf '%s\n' "$archive_url" > "$marker_file"
         return 0

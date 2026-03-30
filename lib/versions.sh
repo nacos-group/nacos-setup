@@ -62,9 +62,9 @@ _VERSIONS_FETCHED=false
 
 # Print info message (if common.sh is not loaded)
 _versions_print_info() {
-    if command -v print_info >/dev/null 2>&1; then
-        print_info "$1" >&2
-    else
+    if command -v print_detail >/dev/null 2>&1; then
+        print_detail "$1" >&2
+    elif [ "${VERBOSE:-false}" = true ]; then
         echo "[INFO] $1" >&2
     fi
 }

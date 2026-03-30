@@ -6,6 +6,7 @@
 
 # Optional Cisco skill-scanner (https://github.com/cisco-ai-defense/skill-scanner)
 # PyPI: cisco-ai-skill-scanner — requires Python 3.10+ and uv.
+# One interactive (Y/n) gate before any uv / Python / venv work; decline or non-TTY skips the whole stack and Nacos continues.
 
 SKILL_SCANNER_PYPI_PACKAGE="cisco-ai-skill-scanner"
 MIN_NACOS_VERSION_FOR_SKILL_SCANNER="3.2.0"
@@ -14,7 +15,11 @@ SKILL_SCANNER_VENV_PATH_RELATIVE="ai-infra/.venv"
 SKILL_SCANNER_INSTALLED="false"
 
 # Always write to stderr (no ANSI); survives logging pipelines.
-_skill_scanner_trace() { printf '%s\n' "[nacos-setup/skill-scanner] $*" >&2; }
+_skill_scanner_trace() {
+    if [ "${VERBOSE:-false}" = true ]; then
+        printf '%s\n' "[nacos-setup/skill-scanner] $*" >&2
+    fi
+}
 
 # Add skill-scanner to PATH if installed via pip/uv but not in PATH
 # This is idempotent - safe to call multiple times
@@ -82,7 +87,7 @@ configure_skill_scanner_properties() {
         return 1
     fi
     
-    _skill_scanner_trace "configuring skill-scanner plugin properties in ${config_file}"
+    print_detail "Configuring skill-scanner plugin properties in ${config_file}"
 
     update_config_property "$config_file" "nacos.plugin.ai-pipeline.enabled" "true"
     update_config_property "$config_file" "nacos.plugin.ai-pipeline.type" "skill-scanner"
@@ -94,7 +99,7 @@ configure_skill_scanner_properties() {
         update_config_property "$config_file" "nacos.plugin.ai-pipeline.skill-scanner.command" "$scanner_cmd"
     fi
 
-    _skill_scanner_trace "skill-scanner plugin properties configured successfully"
+    print_detail "skill-scanner plugin properties configured successfully"
 }
 
 # Entry from standalone.sh / cluster.sh after application.properties is written.
@@ -196,16 +201,20 @@ _skill_scanner_installed_in_venv() {
     _skill_scanner_runas_target_user "$venv_python" -m pip show "$SKILL_SCANNER_PYPI_PACKAGE" >/dev/null 2>&1
 }
 
-_confirm_skill_scanner_install() {
-    # Force explicit user confirmation and avoid blocking in non-interactive contexts.
+# Single gate before any uv / Python / venv / pip work. Returns 0 if user accepts, 1 if decline or non-interactive.
+_confirm_skill_scanner_uv_stack() {
     if [ ! -t 0 ]; then
-        print_warn "skill-scanner is not installed and interactive confirmation is unavailable (non-interactive shell). Skipping installation."
+        print_info "Non-interactive shell: skipping optional Cisco skill-scanner setup (uv / Python 3.10+)."
+        _skill_scanner_trace "skip stack: non-interactive stdin"
         return 1
     fi
 
     local confirm
-    read -r -p "Install Cisco skill-scanner into ~/ai-infra/.venv now? (Y/n): " confirm
-    [[ ! "$confirm" =~ ^[Nn]$ ]]
+    read -r -p "Install Cisco skill-scanner stack (requires uv + Python 3.10+ under ~/ai-infra/.venv)? (Y/n): " confirm
+    if [[ "$confirm" =~ ^[Nn]$ ]]; then
+        return 1
+    fi
+    return 0
 }
 
 _skill_scanner_ensure_version_ge() {
@@ -249,7 +258,27 @@ maybe_install_skill_scanner_for_nacos() {
     # Try to add skill-scanner to PATH if not already there
     _ensure_skill_scanner_in_path
 
-    print_info "Nacos ${nacos_version} >= ${MIN_NACOS_VERSION_FOR_SKILL_SCANNER}: checking Cisco skill-scanner (${SKILL_SCANNER_PYPI_PACKAGE})..."
+    local venv_dir
+    venv_dir=$(_skill_scanner_venv_dir_for_user)
+    local venv_python="${venv_dir}/bin/python"
+
+    if [ -x "$venv_python" ] && _skill_scanner_installed_in_venv "$venv_python"; then
+        SKILL_SCANNER_INSTALLED="true"
+        print_detail "skill-scanner already installed in ${venv_dir} (skip)."
+        return 0
+    fi
+
+    if command -v skill-scanner >/dev/null 2>&1; then
+        _skill_scanner_trace "skill-scanner already on PATH; skip uv/venv install"
+        return 0
+    fi
+
+    print_detail "Nacos ${nacos_version} >= ${MIN_NACOS_VERSION_FOR_SKILL_SCANNER}: optional Cisco skill-scanner (${SKILL_SCANNER_PYPI_PACKAGE})."
+
+    if ! _confirm_skill_scanner_uv_stack; then
+        print_info "Skipping skill-scanner / uv / Python setup. Continuing Nacos startup."
+        return 0
+    fi
 
     if ! _skill_scanner_runas_target_user bash -c 'command -v uv >/dev/null 2>&1'; then
         print_warn "No uv environment detected. Cannot install ${SKILL_SCANNER_PYPI_PACKAGE}."
@@ -264,23 +293,8 @@ maybe_install_skill_scanner_for_nacos() {
         return 0
     }
 
-    local venv_dir
-    venv_dir=$(_skill_scanner_venv_dir_for_user)
-    local venv_python="${venv_dir}/bin/python"
-
-    if [ -x "$venv_python" ] && _skill_scanner_installed_in_venv "$venv_python"; then
-        SKILL_SCANNER_INSTALLED="true"
-        print_info "skill-scanner already installed in ${venv_dir} (skip)."
-        return 0
-    fi
-
-    if ! _confirm_skill_scanner_install; then
-        print_info "Skip installing ${SKILL_SCANNER_PYPI_PACKAGE} (not confirmed)."
-        return 0
-    fi
-
     if [ ! -x "$venv_python" ]; then
-        print_info "Creating uv virtual environment in ${venv_dir}..."
+        print_detail "Creating uv virtual environment in ${venv_dir}..."
         if ! _create_skill_scanner_venv_with_uv "$py_exe" "$venv_dir"; then
             print_warn "Could not create uv virtual environment at ${venv_dir}."
             print_warn "Docs: https://docs.astral.sh/uv/"
@@ -288,16 +302,16 @@ maybe_install_skill_scanner_for_nacos() {
         fi
     fi
 
-    print_info "Installing ${SKILL_SCANNER_PYPI_PACKAGE} into ${venv_dir} via uv..."
+    print_detail "Installing ${SKILL_SCANNER_PYPI_PACKAGE} into ${venv_dir} via uv..."
     if _install_skill_scanner_uv_in_venv "$venv_python"; then
         SKILL_SCANNER_INSTALLED="true"
         if _skill_scanner_ensure_venv_bin_in_path "$venv_dir"; then
-            print_info "Added ${venv_dir}/bin to PATH (current session and shell rc files)."
+            print_detail "Added ${venv_dir}/bin to PATH (current session and shell rc files)."
         else
             print_warn "Installed successfully, but failed to persist PATH update. Please add ${venv_dir}/bin to PATH manually."
         fi
-        print_info "Installed ${SKILL_SCANNER_PYPI_PACKAGE} in ${venv_dir}."
-        print_info "Run with: ${venv_dir}/bin/skill-scanner"
+        print_detail "Installed ${SKILL_SCANNER_PYPI_PACKAGE} in ${venv_dir}."
+        print_detail "Run with: ${venv_dir}/bin/skill-scanner"
         return 0
     fi
 

@@ -92,7 +92,7 @@ init_version() {
         if [ -n "$fetched_version" ] && [ "$fetched_version" != "$DEFAULT_VERSION" ]; then
             DEFAULT_VERSION="$fetched_version"
             VERSION="$fetched_version"
-            print_info "Using latest Nacos server version: $VERSION"
+            print_detail "Using latest Nacos server version: $VERSION"
         fi
     fi
 }
@@ -174,6 +174,7 @@ COMMON OPTIONS:
     -db-conf [NAME]               Use external datasource (default: default)
     db-conf edit [NAME]           Edit datasource configuration
     db-conf show [NAME]           Show datasource configuration
+    -x, --verbose                  Verbose output (show all detailed logs)
     -h, --help                     Show this help message
 
 STANDALONE MODE OPTIONS:
@@ -308,6 +309,10 @@ parse_arguments() {
                 ;;
             --kill)
                 ALLOW_KILL=true
+                shift
+                ;;
+            -x|--verbose)
+                VERBOSE=true
                 shift
                 ;;
             -v|--version)
@@ -455,12 +460,36 @@ setup_skill_scanner_hook_for_nacos_install() {
 }
 
 # ============================================================================
+# nacos-installer resolution status (same [INFO] style as nacos-installer.sh)
+# ============================================================================
+
+print_nacos_installer_resolution_log() {
+    # nacos-installer.sh uses blue [INFO]; keep aligned for operator visibility
+    local BLUE='\033[0;34m'
+    local NC='\033[0m'
+    local installer_url="https://nacos.io/nacos-installer.sh"
+    local local_installer="$SCRIPT_DIR/nacos-installer.sh"
+
+    if [ -f "$local_installer" ]; then
+        echo -e "${BLUE}[INFO]${NC} nacos-installer: using local: $local_installer"
+    else
+        echo -e "${BLUE}[INFO]${NC} nacos-installer: local nacos-installer.sh not found under $SCRIPT_DIR"
+        echo -e "${BLUE}[INFO]${NC} nacos-installer: use: curl -fsSL $installer_url | bash"
+    fi
+}
+
+# ============================================================================
 # Main Entry Point
 # ============================================================================
 
 main() {
     # Parse command line arguments first
     parse_arguments "$@"
+    export VERBOSE
+
+    if [ "$VERBOSE" = true ]; then
+        print_nacos_installer_resolution_log
+    fi
 
     # Handle db-conf mode (local modes that don't need version fetching)
     if [ -n "$DB_CONF_MODE" ]; then
@@ -491,16 +520,30 @@ main() {
 
     # Initialize version (fetch from remote only if user didn't specify -v)
     init_version
-    echo ""
+    if [ "$VERBOSE" = true ]; then echo ""; fi
 
     # Print external datasource mode info if enabled
     if [ "${USE_EXTERNAL_DATASOURCE:-false}" = "true" ]; then
-        print_info "External datasource mode enabled: $DEFAULT_DATASOURCE_CONFIG"
+        print_detail "External datasource mode enabled: $DEFAULT_DATASOURCE_CONFIG"
     fi
 
     # Validate arguments
     validate_arguments
-    
+
+    # Nacos 3.x: offer bundled JRE from OSS if no Java 17+ (optional interactive step)
+    if [ -f "$LIB_DIR/bundled_jre_install.sh" ]; then
+        # shellcheck source=lib/bundled_jre_install.sh
+        source "$LIB_DIR/bundled_jre_install.sh"
+        ensure_bundled_java17_for_nacos_setup "$VERSION"
+        _bundled_jre_status=$?
+        if [ "$_bundled_jre_status" -eq 2 ]; then
+            exit 0
+        fi
+        if [ "$_bundled_jre_status" -ne 0 ]; then
+            exit 1
+        fi
+    fi
+
     # Check system requirements
     if ! check_system_commands; then
         exit 1

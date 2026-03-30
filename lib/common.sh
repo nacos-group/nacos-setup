@@ -38,6 +38,32 @@ print_error() {
 }
 
 # ============================================================================
+# Verbose Output Control
+# ============================================================================
+
+VERBOSE="${VERBOSE:-false}"
+
+print_detail() {
+    if [ "$VERBOSE" = true ]; then
+        echo -e "${GREEN}[INFO]${NC} $1"
+    fi
+}
+
+print_step() {
+    local current=$1 total=$2 desc=$3 result="${4:-}"
+    if [ -n "$result" ]; then
+        echo -e "${GREEN}[${current}/${total}]${NC} ${desc} ${GREEN}✓${NC} ${result}"
+    else
+        echo -e "${GREEN}[${current}/${total}]${NC} ${desc} ${GREEN}✓${NC}"
+    fi
+}
+
+print_step_fail() {
+    local current=$1 total=$2 desc=$3 result="${4:-failed}"
+    echo -e "${RED}[${current}/${total}]${NC} ${desc} ${RED}✗${NC} ${result}"
+}
+
+# ============================================================================
 # Version Comparison
 # ============================================================================
 
@@ -272,7 +298,7 @@ backup_config_file() {
     
     local backup_file="${config_file}.backup.$(date +%Y%m%d_%H%M%S)"
     if cp "$config_file" "$backup_file" 2>/dev/null; then
-        print_info "Config backed up to: $backup_file" >&2
+        print_detail "Config backed up to: $backup_file" >&2
         return 0
     else
         print_warn "Failed to create backup of: $config_file" >&2
@@ -309,7 +335,7 @@ update_config_property() {
 # ============================================================================
 
 check_system_commands() {
-    print_info "Checking required system commands..."
+    print_detail "Checking required system commands..."
     
     local missing_commands=()
     local optional_missing=()
@@ -362,6 +388,6 @@ check_system_commands() {
         echo ""
     fi
     
-    print_info "All required commands are available"
+    print_detail "All required commands are available"
     return 0
 }

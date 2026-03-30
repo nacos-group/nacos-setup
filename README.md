@@ -54,9 +54,9 @@ sudo bash nacos-installer.sh
 nacos-setup --help
 ```
 
-### 可选：安装 nacos-cli
+### 关于 nacos-cli
 
-nacos-cli 是独立的 Nacos 命令行管理工具，默认不会安装。如需使用，可以单独安装：
+nacos-cli 是独立的 Nacos 命令行管理工具，**默认随 installer 一起安装**。如需单独安装 nacos-cli（不安装 nacos-setup），可使用 `--cli` 参数：
 
 #### Linux / macOS
 

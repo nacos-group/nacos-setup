@@ -330,7 +330,7 @@ allocate_standalone_ports() {
                     print_error "No available port pair found" >&2
                     return 1
                 fi
-                print_info "Auto-selected port: $server_port" >&2
+                print_detail "Auto-selected port: $server_port" >&2
             else
                 print_error "Port $server_port unavailable. Use -p to specify different port" >&2
                 return 1
@@ -347,7 +347,7 @@ allocate_standalone_ports() {
             print_error "No available port pair found" >&2
             return 1
         fi
-        print_info "Reallocated to port pair: $server_port (gRPC: $((server_port + 1000)))" >&2
+        print_detail "Reallocated to port pair: $server_port (gRPC: $((server_port + 1000)))" >&2
     fi
     
     # Allocate console port if needed
@@ -363,7 +363,7 @@ allocate_standalone_ports() {
                     return 1
                 fi
             fi
-            print_info "Console port: $console_port" >&2
+            print_detail "Console port: $console_port" >&2
         fi
     fi
     
@@ -413,7 +413,7 @@ allocate_cluster_ports() {
                 print_error "Could not find available port set for node $i" >&2
                 return 1
             fi
-            print_info "Node $i using alternative port: $main_port (gRPC: $((main_port+1000)),$((main_port+1001)), Raft: $((main_port-1000)))" >&2
+            print_detail "Node $i using alternative port: $main_port (gRPC: $((main_port+1000)),$((main_port+1001)), Raft: $((main_port-1000)))" >&2
         fi
         
         # Allocate console port (only for Nacos 3.x)

@@ -47,17 +47,19 @@ wait_for_nacos_ready() {
     while [ $wait_count -lt $max_wait ]; do
         # Check health endpoint
         if curl -sf "$health_url" >/dev/null 2>&1; then
-            echo -ne "\r\033[K" >&2
+            if [ "$VERBOSE" = true ]; then echo -ne "\r\033[K" >&2; fi
             return 0
         fi
         
-        # Update countdown display
-        echo -ne "\r[INFO] Waiting for Nacos to be ready... ${wait_count}s" >&2
+        # Update countdown display (verbose only to keep simple output clean)
+        if [ "$VERBOSE" = true ]; then
+            echo -ne "\r[INFO] Waiting for Nacos to be ready... ${wait_count}s" >&2
+        fi
         sleep 1
         wait_count=$((wait_count + 1))
     done
     
-    echo "" >&2
+    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
     print_warn "Nacos health check timeout after ${max_wait}s" >&2
     return 1
 }
@@ -90,7 +92,7 @@ initialize_admin_password() {
         api_url="http://localhost:${main_port}/nacos/v1/auth/users/admin"
     fi
     
-    print_info "Initializing admin password..."
+    print_detail "Initializing admin password..."
     
     # Call the password change API
     local response
@@ -103,7 +105,7 @@ initialize_admin_password() {
     
     # Check if response is successful
     if echo "$body" | grep -q '"username"'; then
-        print_info "Admin password initialized successfully"
+        print_detail "Admin password initialized successfully"
         return 0
     else
         print_warn "Failed to initialize password automatically"
@@ -288,18 +290,21 @@ print_completion_info() {
     print_info "Nacos Started Successfully!"
     echo "========================================"
     echo ""
-    echo "Installation Directory: $install_dir"
-    echo "Console URL: $console_url"
+    echo "  Console URL: $console_url"
     echo ""
-    print_info "Port allocation:"
-    echo "  - Server Port: $server_port"
-    echo "  - Client gRPC Port: $((server_port + 1000))"
-    echo "  - Server gRPC Port: $((server_port + 1001))"
-    echo "  - Raft Port: $((server_port - 1000))"
-    if [ "$nacos_major" -ge 3 ]; then
-        echo "  - Console Port: $console_port"
+    if [ "$VERBOSE" = true ]; then
+        echo "  Installation: $install_dir"
+        echo ""
+        print_info "Port allocation:"
+        echo "  - Server Port: $server_port"
+        echo "  - Client gRPC Port: $((server_port + 1000))"
+        echo "  - Server gRPC Port: $((server_port + 1001))"
+        echo "  - Raft Port: $((server_port - 1000))"
+        if [ "$nacos_major" -ge 3 ]; then
+            echo "  - Console Port: $console_port"
+        fi
+        echo ""
     fi
-    echo ""
     
     local clipboard_success=false
     local browser_success=false

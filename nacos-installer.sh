@@ -716,13 +716,18 @@ print_usage_info() {
         install_location="$INSTALL_BASE_DIR/$(readlink "$INSTALL_BASE_DIR/$CURRENT_LINK")"
     fi
 
+    local cli_status="not installed"
+    if [ -x "$BIN_DIR/nacos-cli" ]; then
+        cli_status="installed"
+    fi
+
     echo "========================================"
     echo "  Nacos Setup Installation Complete"
     echo "========================================"
     echo ""
-    echo "Version: $version"
+    echo "nacos-setup version: $version"
+    echo "nacos-cli: $cli_status"
     echo "Installation location: $install_location"
-    echo "Global command: $SCRIPT_NAME"
     echo ""
     echo "Quick Start:"
     echo ""
@@ -823,7 +828,6 @@ main() {
     echo ""
 
     # Parse arguments
-    local install_cli=false
     local only_cli=false
     local cli_version=""
     local setup_version=""
@@ -839,7 +843,6 @@ main() {
                 exit 0
                 ;;
             --cli)
-                install_cli=true
                 only_cli=true
                 shift
                 ;;
@@ -852,7 +855,7 @@ main() {
                     exit 1
                 fi
                 # 根据模式决定版本类型
-                if [[ "$install_cli" == true ]]; then
+                if [[ "$only_cli" == true ]]; then
                     cli_version="$2"
                 else
                     setup_version="$2"
@@ -865,7 +868,7 @@ main() {
                 echo "Install nacos-setup and nacos-cli tools for managing Nacos instances."
                 echo ""
                 echo "Options:"
-                echo "  (none)              Install nacos-setup"
+                echo "  (none)              Install nacos-setup + nacos-cli (default)"
                 echo "  -v, --version       Specify version (nacos-setup or nacos-cli with --cli)"
                 echo "  --cli               Install nacos-cli only"
                 echo "  version             Show installed version"
@@ -873,10 +876,10 @@ main() {
                 echo "  --help, -h          Show this help message"
                 echo ""
                 echo "Examples:"
-                echo "  ./nacos-installer.sh                    Install latest nacos-setup"
-                echo "  ./nacos-installer.sh -v 0.0.3           Install nacos-setup v0.0.3"
-                echo "  ./nacos-installer.sh --cli              Install latest nacos-cli"
-                echo "  ./nacos-installer.sh --cli -v 0.0.3     Install nacos-cli v0.0.3"
+                echo "  ./nacos-installer.sh                    Install nacos-setup + nacos-cli"
+                echo "  ./nacos-installer.sh -v 0.0.3           Install nacos-setup v0.0.3 + nacos-cli"
+                echo "  ./nacos-installer.sh --cli              Install nacos-cli only"
+                echo "  ./nacos-installer.sh --cli -v 0.0.3     Install nacos-cli v0.0.3 only"
                 echo ""
                 echo "After installation, use 'nacos-setup' command to manage Nacos:"
                 echo "  nacos-setup --help              Show nacos-setup help"
@@ -919,24 +922,25 @@ main() {
         exit $?
     fi
 
-    # Install
+    # Install nacos-setup
     install_nacos_setup "$setup_version"
 
-    # Verify
-    if verify_installation; then
-        print_usage_info
-    else
+    # Verify nacos-setup installation
+    if ! verify_installation; then
         print_error "Installation verification failed"
         exit 1
     fi
 
-    # Install nacos-cli if --cli flag is provided
-    if [[ "$install_cli" == true ]]; then
-        echo ""
-        install_nacos_cli
+    # Install nacos-cli (bundled by default)
+    echo ""
+    if ! install_nacos_cli; then
+        print_warn "nacos-cli installation failed, but nacos-setup is ready"
     fi
 
-    # Always offer to install Nacos Server (unless --cli only)
+    # Print usage info after all installations
+    print_usage_info
+
+    # Always offer to install Nacos Server
     echo ""
     # Use server version from versions file or fallback
     detected_default_version="${NACOS_SERVER_VERSION:-$FALLBACK_NACOS_SERVER_VERSION}"

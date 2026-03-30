@@ -40,25 +40,63 @@ wait_for_nacos_ready() {
     local nacos_version=$3
     local max_wait=${4:-60}
     local wait_count=0
-    local health_url
+    local -a health_urls=()
+    local -a fallback_urls=()
     
-    # Determine health check URL based on Nacos version
+    # Determine health check URL(s) based on Nacos version
     local nacos_major=$(echo "$nacos_version" | cut -d. -f1)
     if [ "$nacos_major" -ge 3 ]; then
-        health_url="http://localhost:${console_port}/v3/console/health/readiness"
+        health_urls=(
+            "http://127.0.0.1:${console_port}/v3/console/health/readiness"
+            "http://localhost:${console_port}/v3/console/health/readiness"
+            "http://127.0.0.1:${console_port}/nacos/v3/console/health/readiness"
+            "http://localhost:${console_port}/nacos/v3/console/health/readiness"
+        )
+        # Some builds may expose only the root console endpoint at startup.
+        fallback_urls=(
+            "http://127.0.0.1:${console_port}/"
+            "http://localhost:${console_port}/"
+            "http://127.0.0.1:${main_port}/nacos/"
+            "http://localhost:${main_port}/nacos/"
+        )
     else
-        health_url="http://localhost:${main_port}/nacos/v2/console/health/readiness"
+        health_urls=(
+            "http://127.0.0.1:${main_port}/nacos/v2/console/health/readiness"
+            "http://localhost:${main_port}/nacos/v2/console/health/readiness"
+        )
+        fallback_urls=(
+            "http://127.0.0.1:${main_port}/nacos/"
+            "http://localhost:${main_port}/nacos/"
+        )
     fi
     
-    _pm_debug "wait_for_nacos_ready url=${health_url} max_wait=${max_wait}s"
+    _pm_debug "wait_for_nacos_ready max_wait=${max_wait}s"
+    _pm_debug "health_urls=${health_urls[*]}"
+    _pm_debug "fallback_urls=${fallback_urls[*]}"
     _pm_debug "HTTP_PROXY=${HTTP_PROXY:-<empty>} HTTPS_PROXY=${HTTPS_PROXY:-<empty>} NO_PROXY=${NO_PROXY:-<empty>}"
 
     while [ $wait_count -lt $max_wait ]; do
-        # Check health endpoint
-        if curl --noproxy "*" --connect-timeout 2 --max-time 3 -sf "$health_url" >/dev/null 2>&1; then
-            if [ "$VERBOSE" = true ]; then echo -ne "\r\033[K" >&2; fi
-            return 0
-        fi
+        local url
+
+        # 1) strict readiness endpoint(s)
+        for url in "${health_urls[@]}"; do
+            if curl --noproxy "*" --connect-timeout 2 --max-time 3 -sf "$url" >/dev/null 2>&1; then
+                _pm_debug "Readiness OK via ${url}"
+                if [ "$VERBOSE" = true ]; then echo -ne "\r\033[K" >&2; fi
+                return 0
+            fi
+        done
+
+        # 2) fallback: service endpoint responds with any HTTP status (not 000)
+        for url in "${fallback_urls[@]}"; do
+            local code
+            code=$(curl --noproxy "*" --connect-timeout 2 --max-time 3 -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
+            if [ "$code" != "000" ]; then
+                _pm_debug "Fallback endpoint responded (${code}) via ${url}; treat as started"
+                if [ "$VERBOSE" = true ]; then echo -ne "\r\033[K" >&2; fi
+                return 0
+            fi
+        done
         
         # Update countdown display (verbose only to keep simple output clean)
         if [ "$VERBOSE" = true ]; then

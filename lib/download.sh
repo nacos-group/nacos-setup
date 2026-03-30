@@ -206,6 +206,8 @@ extract_nacos_to_target() {
         
         # Set permissions
         chmod +x "$final_path/bin/"*.sh 2>/dev/null || true
+
+        patch_nacos_startup_for_windows_jvm_paths "$final_path"
         
         print_detail "Node extracted: $final_path" >&2
         return 0
@@ -214,6 +216,58 @@ extract_nacos_to_target() {
         rm -rf "$temp_extract"
         return 1
     fi
+}
+
+# After BASE_DIR is set, rewrite it to a Windows-native path (e.g. C:/Users/...)
+# when running under MSYS/Cygwin/Git Bash. HotSpot uses Win32 APIs and typically
+# cannot open -Xlog:gc*:file=/c/... paths, which surfaces as ENOENT on nacos_gc.log.
+# Parameters: nacos_home (installation root containing bin/startup.sh)
+# Returns: 0
+patch_nacos_startup_for_windows_jvm_paths() {
+    local nacos_home=$1
+    local startup_sh="$nacos_home/bin/startup.sh"
+
+    [ -f "$startup_sh" ] || return 0
+    if grep -q 'nacos-setup: rewrites BASE_DIR for Windows JVM' "$startup_sh" 2>/dev/null; then
+        return 0
+    fi
+
+    local tmp
+    tmp=$(mktemp "${TMPDIR:-/tmp}/nacos-patch-startup.XXXXXX")
+    local inserted=false
+    local line
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+        if [ "$inserted" = false ] && printf '%s' "$line" | grep -q '^export BASE_DIR='; then
+            cat <<'PATCH_BLOCK'
+# nacos-setup: rewrites BASE_DIR for Windows JVM (-Xlog:gc paths, -Dloader.path, -jar, etc.).
+# Bash `pwd` under MSYS/Cygwin yields /c/...; HotSpot on Windows needs a C:/... (or cygpath) path.
+case "$(uname -s 2>/dev/null)" in
+CYGWIN*|MINGW*|MSYS*)
+  if command -v cygpath >/dev/null 2>&1; then
+    __nacos_setup_bd_win=$(cygpath -aw "$BASE_DIR" 2>/dev/null) || __nacos_setup_bd_win=""
+  else
+    __nacos_setup_bd_win=$(cd "$(dirname "$0")/.." && pwd -W 2>/dev/null) || __nacos_setup_bd_win=""
+  fi
+  [ -n "$__nacos_setup_bd_win" ] && export BASE_DIR="$__nacos_setup_bd_win"
+  unset __nacos_setup_bd_win
+  ;;
+esac
+PATCH_BLOCK
+            inserted=true
+        fi
+    done < "$startup_sh" > "$tmp"
+
+    if [ "$inserted" = true ]; then
+        mv "$tmp" "$startup_sh"
+        chmod +x "$startup_sh" 2>/dev/null || true
+        print_detail "Patched bin/startup.sh for Windows JVM paths" >&2
+    else
+        rm -f "$tmp"
+        print_warn "Could not patch bin/startup.sh (no export BASE_DIR= line found)" >&2
+    fi
+    return 0
 }
 
 # ============================================================================
@@ -263,6 +317,8 @@ install_nacos() {
     
     # Set permissions for bin scripts
     chmod +x "$target_dir/bin/"*.sh 2>/dev/null || true
+
+    patch_nacos_startup_for_windows_jvm_paths "$target_dir"
     
     print_detail "Installation completed: $target_dir"
     return 0

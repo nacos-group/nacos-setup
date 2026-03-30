@@ -218,6 +218,31 @@ _bundled_jdk_acquire_zip() {
     return 0
 }
 
+# Nacos OSS ships jdk17-*.zip as a wrapper: one top-level *.tar.gz (plus optional __MACOSX).
+# After unzip, extract that tarball so bin/java appears under BUNDLED_JRE_ROOT.
+_bundled_maybe_unwrap_tar_gz_in_jre_root() {
+    local root="$1"
+    local tgz
+    tgz=$(find "$root" -maxdepth 1 -type f -name 'jdk*.tar.gz' 2>/dev/null | head -n 1)
+    if [ -z "$tgz" ]; then
+        tgz=$(find "$root" -maxdepth 1 -type f -name '*.tar.gz' 2>/dev/null | head -n 1)
+    fi
+    if [ -z "$tgz" ] || [ ! -f "$tgz" ]; then
+        return 1
+    fi
+    print_detail "Unpacking nested JDK tarball: $(basename "$tgz")" >&2
+    if ! command -v tar >/dev/null 2>&1; then
+        print_error "Command 'tar' is required to unpack the JDK .tar.gz inside the zip." >&2
+        return 1
+    fi
+    if ! tar -xzf "$tgz" -C "$root"; then
+        print_error "Failed to extract JDK tarball: $tgz" >&2
+        return 1
+    fi
+    rm -f "$tgz" 2>/dev/null || true
+    return 0
+}
+
 _download_extract_bundled_jre() {
     local url
     url=$(_bundled_jdk_resolve_url) || return 1
@@ -233,18 +258,29 @@ _download_extract_bundled_jre() {
     mkdir -p "$BUNDLED_JRE_ROOT"
     rm -rf "${BUNDLED_JRE_ROOT:?}/"*
 
-    print_detail "Extracting JDK into ${BUNDLED_JRE_ROOT}..."
+    print_detail "Extracting JDK into ${BUNDLED_JRE_ROOT}..." >&2
     if ! unzip -q "$zip_path" -d "$BUNDLED_JRE_ROOT"; then
-        print_error "Failed to extract JDK archive."
+        print_error "Failed to extract JDK archive." >&2
+        return 1
+    fi
+
+    if _apply_bundled_java_home_from_root "$BUNDLED_JRE_ROOT"; then
+        print_detail "Bundled JDK ready: JAVA_HOME=$JAVA_HOME" >&2
+        return 0
+    fi
+
+    if ! _bundled_maybe_unwrap_tar_gz_in_jre_root "$BUNDLED_JRE_ROOT"; then
+        print_error "Extracted archive did not contain a usable Java 17+ under $BUNDLED_JRE_ROOT" >&2
+        print_error "Expected either bin/java in the zip or a top-level jdk*.tar.gz inside the zip." >&2
         return 1
     fi
 
     if ! _apply_bundled_java_home_from_root "$BUNDLED_JRE_ROOT"; then
-        print_error "Extracted archive did not contain a usable Java 17+ under $BUNDLED_JRE_ROOT"
+        print_error "Extracted archive did not contain a usable Java 17+ under $BUNDLED_JRE_ROOT" >&2
         return 1
     fi
 
-    print_detail "Bundled JDK ready: JAVA_HOME=$JAVA_HOME"
+    print_detail "Bundled JDK ready: JAVA_HOME=$JAVA_HOME" >&2
     return 0
 }
 

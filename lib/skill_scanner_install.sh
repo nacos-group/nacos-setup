@@ -6,7 +6,8 @@
 
 # Optional Cisco skill-scanner (https://github.com/cisco-ai-defense/skill-scanner)
 # PyPI: cisco-ai-skill-scanner — requires Python 3.10+ and uv.
-# One interactive (Y/n) gate before any uv / Python / venv work; decline or non-TTY skips the whole stack and Nacos continues.
+# One interactive (Y/n) gate before any uv / Python / venv work; decline skips the whole stack.
+# stdin may be a pipe (curl | bash): prompt is read from /dev/tty when available; no usable TTY skips.
 # After Y: missing uv is bootstrapped via install.sh (curl/wget/fetch, else Python urllib / ruby / node); missing Python 3.10+ uses `uv python install 3.10`.
 
 SKILL_SCANNER_PYPI_PACKAGE="cisco-ai-skill-scanner"
@@ -428,16 +429,21 @@ _skill_scanner_installed_in_venv() {
     _skill_scanner_runas_target_user "$venv_python" -m pip show "$SKILL_SCANNER_PYPI_PACKAGE" >/dev/null 2>&1
 }
 
-# Single gate before any uv / Python / venv / pip work. Returns 0 if user accepts, 1 if decline or non-interactive.
+# Single gate before any uv / Python / venv / pip work. Returns 0 if user accepts, 1 if decline or no TTY.
 _confirm_skill_scanner_uv_stack() {
-    if [ ! -t 0 ]; then
-        print_info "Non-interactive shell: skipping optional Cisco skill-scanner setup (uv / Python 3.10+)."
-        _skill_scanner_trace "skip stack: non-interactive stdin"
+    local confirm
+    local prompt="Install Cisco skill-scanner stack (uv + Python 3.10+ under ~/ai-infra/.venv; missing tools will be installed)? (Y/n): "
+
+    if [ -t 0 ]; then
+        read -r -p "$prompt" confirm
+    elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        # Piped installs (e.g. curl | bash): stdin is the script; ask on the controlling terminal.
+        read -r -p "$prompt" confirm </dev/tty
+    else
+        print_info "No interactive terminal: skipping optional Cisco skill-scanner setup (uv / Python 3.10+)."
+        _skill_scanner_trace "skip stack: no tty (stdin not a tty and /dev/tty unavailable)"
         return 1
     fi
-
-    local confirm
-    read -r -p "Install Cisco skill-scanner stack (uv + Python 3.10+ under ~/ai-infra/.venv; missing tools will be installed)? (Y/n): " confirm
     if [[ "$confirm" =~ ^[Nn]$ ]]; then
         return 1
     fi

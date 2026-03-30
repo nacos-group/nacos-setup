@@ -9,6 +9,7 @@
 # One interactive (Y/n) gate before any uv / Python / venv work; decline skips the whole stack.
 # stdin may be a pipe (curl | bash): prompt is read from /dev/tty when available; no usable TTY skips.
 # After Y: missing uv is bootstrapped via install.sh (curl/wget/fetch, else Python urllib / ruby / node); missing Python 3.10+ uses `uv python install 3.10`.
+# Simple UI (VERBOSE not true): installer uses UV_PRINT_QUIET; uv uses UV_NO_PROGRESS, -q/-qq, and stdout/stderr discarded where safe so progress spinners do not flood the console.
 
 SKILL_SCANNER_PYPI_PACKAGE="cisco-ai-skill-scanner"
 MIN_NACOS_VERSION_FOR_SKILL_SCANNER="3.2.0"
@@ -126,6 +127,11 @@ _skill_scanner_trace() {
     if [ "${VERBOSE:-false}" = true ]; then
         printf '%s\n' "[nacos-setup/skill-scanner] $*" >&2
     fi
+}
+
+# Simple UI (step_simple_*): suppress uv/installer progress bars and package spinners.
+_skill_scanner_uv_use_quiet_output() {
+    [ "${VERBOSE:-false}" != true ]
 }
 
 # Add skill-scanner to PATH if installed via pip/uv but not in PATH
@@ -254,9 +260,14 @@ _skill_scanner_have_url_fetch_tool() {
 # Run official uv install.sh in the target user environment (same shell as nacos-setup).
 # Prefers curl → wget → fetch (BSD) → Python urllib → ruby open-uri → node https.
 _skill_scanner_run_uv_install_sh() {
+    local quiet_install="${1:-0}"
     _skill_scanner_runas_target_user bash -c "
         set -eo pipefail
         url=\"\$1\"
+        quiet=\"\$2\"
+        if [ \"\$quiet\" = 1 ]; then
+            export UV_PRINT_QUIET=1
+        fi
         if command -v curl >/dev/null 2>&1; then
             curl -LsSf \"\$url\" | sh
         elif command -v wget >/dev/null 2>&1; then
@@ -295,7 +306,7 @@ else:
                 exit 1
             fi
         fi
-    " _ "https://astral.sh/uv/install.sh"
+    " _ "https://astral.sh/uv/install.sh" "$quiet_install"
 }
 
 # Prepend a directory to PATH in this shell if it exists and is not already present.
@@ -327,7 +338,9 @@ _skill_scanner_bootstrap_uv() {
     fi
     print_detail "Installing uv (https://astral.sh/uv/) via official install script..."
     # Non-interactive-friendly; installs to ~/.local/bin by default on Unix.
-    if ! _skill_scanner_run_uv_install_sh; then
+    local q=0
+    _skill_scanner_uv_use_quiet_output && q=1
+    if ! _skill_scanner_run_uv_install_sh "$q"; then
         print_warn "Automatic uv installation failed. Install manually: https://docs.astral.sh/uv/getting-started/installation/"
         return 1
     fi
@@ -366,7 +379,18 @@ _ensure_python_310_plus_with_uv() {
     # Fallback: uv-managed Python when system Python is missing or < 3.10.
     # print_detail and uv must go to stderr: caller uses py_exe=$(this_func) and only stdout must be the interpreter path.
     print_detail "No Python 3.10+ on PATH; installing Python 3.10 with uv..." >&2
-    if _skill_scanner_runas_target_user uv python install 3.10 >&2; then
+    local py_install_ok=0
+    if _skill_scanner_uv_use_quiet_output; then
+        if _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 uv -q python install 3.10 >/dev/null 2>&1; then
+            py_install_ok=1
+        fi
+    else
+        if _skill_scanner_runas_target_user uv python install 3.10 >&2; then
+            py_install_ok=1
+        fi
+    fi
+    py_exe=""
+    if [ "$py_install_ok" -eq 1 ]; then
         py_exe=$(_skill_scanner_runas_target_user uv python find 3.10 2>/dev/null || true)
     fi
 
@@ -385,12 +409,20 @@ _skill_scanner_venv_dir_for_user() {
 _create_skill_scanner_venv_with_uv() {
     local py_exe=$1
     local venv_dir=$2
-    _skill_scanner_runas_target_user uv venv --python "$py_exe" "$venv_dir"
+    if _skill_scanner_uv_use_quiet_output; then
+        _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 uv -q venv --python "$py_exe" "$venv_dir" >/dev/null 2>&1
+    else
+        _skill_scanner_runas_target_user uv venv --python "$py_exe" "$venv_dir"
+    fi
 }
 
 _install_skill_scanner_uv_in_venv() {
     local venv_python=$1
-    _skill_scanner_runas_target_user uv pip install --python "$venv_python" "$SKILL_SCANNER_PYPI_PACKAGE"
+    if _skill_scanner_uv_use_quiet_output; then
+        _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 uv -qq pip install --python "$venv_python" "$SKILL_SCANNER_PYPI_PACKAGE" >/dev/null 2>&1
+    else
+        _skill_scanner_runas_target_user uv pip install --python "$venv_python" "$SKILL_SCANNER_PYPI_PACKAGE"
+    fi
 }
 
 _skill_scanner_ensure_venv_bin_in_path() {

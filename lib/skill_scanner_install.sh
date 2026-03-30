@@ -15,6 +15,56 @@ _SKILL_SCANNER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_SCANNER_VENV_PATH_RELATIVE="ai-infra/.venv"
 SKILL_SCANNER_INSTALLED="false"
 
+# Git Bash / MSYS / Cygwin: venv uses Scripts/*.exe, not bin/python.
+_skill_scanner_is_windows_env() {
+    case "${OSTYPE:-}" in
+        cygwin | msys) return 0 ;;
+    esac
+    case "$(uname -s 2>/dev/null)" in
+        CYGWIN* | MINGW* | MSYS*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Directory containing venv console_scripts / python (bin vs Scripts).
+_skill_scanner_venv_scripts_dir() {
+    local venv_dir="$1"
+    if _skill_scanner_is_windows_env; then
+        printf '%s\n' "${venv_dir}/Scripts"
+    else
+        printf '%s\n' "${venv_dir}/bin"
+    fi
+}
+
+# Path to the venv Python interpreter for uv/pip --python.
+_skill_scanner_venv_python_path() {
+    local venv_dir="$1"
+    if _skill_scanner_is_windows_env; then
+        printf '%s\n' "${venv_dir}/Scripts/python.exe"
+    else
+        printf '%s\n' "${venv_dir}/bin/python"
+    fi
+}
+
+# Path to skill-scanner CLI inside the venv (if installed).
+_skill_scanner_venv_skill_scanner_path() {
+    local venv_dir="$1"
+    if _skill_scanner_is_windows_env; then
+        printf '%s\n' "${venv_dir}/Scripts/skill-scanner.exe"
+    else
+        printf '%s\n' "${venv_dir}/bin/skill-scanner"
+    fi
+}
+
+# True if venv python exists (executable or regular file on Windows .exe).
+_skill_scanner_venv_python_exists() {
+    local p="$1"
+    [ -z "$p" ] && return 1
+    [ -x "$p" ] && return 0
+    _skill_scanner_is_windows_env && [ -f "$p" ] && return 0
+    return 1
+}
+
 # Always write to stderr (no ANSI); survives logging pipelines.
 _skill_scanner_trace() {
     if [ "${VERBOSE:-false}" = true ]; then
@@ -69,11 +119,14 @@ _ensure_skill_scanner_in_path() {
 # Return the actual path to the skill-scanner executable.
 # Prefers the venv bin path; falls back to command -v.
 _get_skill_scanner_command_path() {
-    local venv_dir
+    local venv_dir scanner
     venv_dir=$(_skill_scanner_venv_dir_for_user 2>/dev/null || true)
-    if [ -n "$venv_dir" ] && [ -x "${venv_dir}/bin/skill-scanner" ]; then
-        printf '%s\n' "${venv_dir}/bin/skill-scanner"
-        return 0
+    if [ -n "$venv_dir" ]; then
+        scanner=$(_skill_scanner_venv_skill_scanner_path "$venv_dir")
+        if [ -x "$scanner" ] || { _skill_scanner_is_windows_env && [ -f "$scanner" ]; }; then
+            printf '%s\n' "$scanner"
+            return 0
+        fi
     fi
     command -v skill-scanner 2>/dev/null
 }
@@ -285,7 +338,8 @@ _install_skill_scanner_uv_in_venv() {
 
 _skill_scanner_ensure_venv_bin_in_path() {
     local venv_dir=$1
-    local venv_bin="${venv_dir}/bin"
+    local venv_bin
+    venv_bin=$(_skill_scanner_venv_scripts_dir "$venv_dir")
     local export_line="export PATH=\"${venv_bin}:\$PATH\""
 
     # Current process PATH (helps immediate invocation in this script run).
@@ -308,10 +362,11 @@ _skill_scanner_ensure_venv_bin_in_path() {
 
 _skill_scanner_installed_in_venv() {
     local venv_python=$1
-    local venv_dir
+    local venv_dir scanner
     venv_dir=$(dirname "$(dirname "$venv_python")")
+    scanner=$(_skill_scanner_venv_skill_scanner_path "$venv_dir")
     # uv-managed venvs often have no pip module; the CLI is the reliable signal.
-    if [ -x "${venv_dir}/bin/skill-scanner" ]; then
+    if [ -x "$scanner" ] || { _skill_scanner_is_windows_env && [ -f "$scanner" ]; }; then
         return 0
     fi
     _skill_scanner_runas_target_user "$venv_python" -m pip show "$SKILL_SCANNER_PYPI_PACKAGE" >/dev/null 2>&1
@@ -374,11 +429,12 @@ maybe_install_skill_scanner_for_nacos() {
     # Try to add skill-scanner to PATH if not already there
     _ensure_skill_scanner_in_path
 
-    local venv_dir
+    local venv_dir venv_python venv_scripts
     venv_dir=$(_skill_scanner_venv_dir_for_user)
-    local venv_python="${venv_dir}/bin/python"
+    venv_python=$(_skill_scanner_venv_python_path "$venv_dir")
+    venv_scripts=$(_skill_scanner_venv_scripts_dir "$venv_dir")
 
-    if [ -x "$venv_python" ] && _skill_scanner_installed_in_venv "$venv_python"; then
+    if _skill_scanner_venv_python_exists "$venv_python" && _skill_scanner_installed_in_venv "$venv_python"; then
         SKILL_SCANNER_INSTALLED="true"
         print_detail "skill-scanner already installed in ${venv_dir} (skip)."
         return 0
@@ -408,25 +464,26 @@ maybe_install_skill_scanner_for_nacos() {
         return 0
     }
 
-    if [ ! -x "$venv_python" ]; then
+    if ! _skill_scanner_venv_python_exists "$venv_python"; then
         print_detail "Creating uv virtual environment in ${venv_dir}..."
         if ! _create_skill_scanner_venv_with_uv "$py_exe" "$venv_dir"; then
             print_warn "Could not create uv virtual environment at ${venv_dir}."
             print_warn "Docs: https://docs.astral.sh/uv/"
             return 0
         fi
+        venv_python=$(_skill_scanner_venv_python_path "$venv_dir")
     fi
 
     print_detail "Installing ${SKILL_SCANNER_PYPI_PACKAGE} into ${venv_dir} via uv..."
     if _install_skill_scanner_uv_in_venv "$venv_python"; then
         SKILL_SCANNER_INSTALLED="true"
         if _skill_scanner_ensure_venv_bin_in_path "$venv_dir"; then
-            print_detail "Added ${venv_dir}/bin to PATH (current session and shell rc files)."
+            print_detail "Added ${venv_scripts} to PATH (current session and shell rc files)."
         else
-            print_warn "Installed successfully, but failed to persist PATH update. Please add ${venv_dir}/bin to PATH manually."
+            print_warn "Installed successfully, but failed to persist PATH update. Please add ${venv_scripts} to PATH manually."
         fi
         print_detail "Installed ${SKILL_SCANNER_PYPI_PACKAGE} in ${venv_dir}."
-        print_detail "Run with: ${venv_dir}/bin/skill-scanner"
+        print_detail "Run with: $(_skill_scanner_venv_skill_scanner_path "$venv_dir")"
         return 0
     fi
 

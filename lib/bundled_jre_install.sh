@@ -11,6 +11,7 @@
 # NACOS_SETUP_JRE17_DOWNLOAD_URL.
 #
 # Set NACOS_SETUP_SKIP_BUNDLED_JRE=1 to skip this step.
+# Set NACOS_SETUP_SKIP_AUTO_INSTALL_UNZIP=1 to refuse auto-installing unzip (fail if missing).
 
 BUNDLED_JDK_CACHE_DIR="${NACOS_CACHE_DIR:-$HOME/.nacos/cache}"
 JDK17_OSS_BASE="https://download.nacos.io/base"
@@ -133,6 +134,37 @@ _bundled_find_java_binary() {
     return 1
 }
 
+# OSS zip often wraps the real JDK as jdk17-*-*.tar.gz (not a flat bin/java tree).
+_bundled_extract_inner_payload_if_needed() {
+    local root="$1"
+    local tg
+
+    rm -rf "${root}/__MACOSX" 2>/dev/null || true
+
+    if _bundled_find_java_binary "$root" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    tg=$(find "$root" -maxdepth 1 -type f \( -name 'jdk17-*.tar.gz' -o -name 'jdk-*.tar.gz' \) 2>/dev/null | head -1)
+    if [ -z "$tg" ]; then
+        tg=$(find "$root" -maxdepth 1 -type f -name '*.tar.gz' 2>/dev/null | head -1)
+    fi
+    if [ -z "$tg" ]; then
+        return 0
+    fi
+
+    print_detail "Extracting inner JDK archive: $(basename "$tg")" >&2
+    if ! command -v tar >/dev/null 2>&1; then
+        print_error "Command 'tar' is required to extract the JDK tarball." >&2
+        return 1
+    fi
+    if ! tar -xzf "$tg" -C "$root"; then
+        print_error "Failed to extract inner JDK tarball: $tg" >&2
+        return 1
+    fi
+    return 0
+}
+
 _apply_bundled_java_home_from_root() {
     local root="$1"
     local java_bin
@@ -151,8 +183,11 @@ _bundled_jre_reuse_if_present() {
     if [ ! -d "$BUNDLED_JRE_ROOT" ]; then
         return 1
     fi
+    if ! _bundled_extract_inner_payload_if_needed "$BUNDLED_JRE_ROOT"; then
+        return 1
+    fi
     if _apply_bundled_java_home_from_root "$BUNDLED_JRE_ROOT"; then
-        print_detail "Using existing bundled JRE at JAVA_HOME=$JAVA_HOME"
+        print_detail "Using existing bundled JRE at JAVA_HOME=$JAVA_HOME" >&2
         return 0
     fi
     return 1
@@ -172,6 +207,82 @@ _confirm_bundled_jre_install() {
     return 0
 }
 
+# Run a command with root privileges when needed (package install).
+_bundled_run_as_root() {
+    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        print_error "unzip is missing and you are not root; install unzip manually or re-run with sudo." >&2
+        return 1
+    fi
+}
+
+# Ensure unzip exists; try to install on common Linux/macOS when absent.
+_bundled_ensure_unzip() {
+    if command -v unzip >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if [ "${NACOS_SETUP_SKIP_AUTO_INSTALL_UNZIP:-}" = "1" ] || [ "${NACOS_SETUP_SKIP_AUTO_INSTALL_UNZIP:-}" = "true" ]; then
+        print_error "unzip is not installed; auto-install disabled (NACOS_SETUP_SKIP_AUTO_INSTALL_UNZIP=1)." >&2
+        print_info  "Install: yum install -y unzip   or   apt-get install -y unzip" >&2
+        return 1
+    fi
+
+    print_info "unzip not found; attempting to install..." >&2
+
+    local os
+    os=$(detect_os_arch)
+
+    case "$os" in
+        linux)
+            if command -v apt-get >/dev/null 2>&1; then
+                if _bundled_run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unzip 2>/dev/null; then
+                    command -v unzip >/dev/null 2>&1 && return 0
+                fi
+                if _bundled_run_as_root env DEBIAN_FRONTEND=noninteractive sh -c 'apt-get update -qq && apt-get install -y -qq unzip'; then
+                    command -v unzip >/dev/null 2>&1 && return 0
+                fi
+            fi
+            if command -v dnf >/dev/null 2>&1; then
+                if _bundled_run_as_root dnf install -y unzip; then
+                    command -v unzip >/dev/null 2>&1 && return 0
+                fi
+            fi
+            if command -v yum >/dev/null 2>&1; then
+                if _bundled_run_as_root yum install -y unzip; then
+                    command -v unzip >/dev/null 2>&1 && return 0
+                fi
+            fi
+            if command -v apk >/dev/null 2>&1; then
+                if _bundled_run_as_root apk add --no-cache unzip; then
+                    command -v unzip >/dev/null 2>&1 && return 0
+                fi
+            fi
+            if command -v zypper >/dev/null 2>&1; then
+                if _bundled_run_as_root zypper install -y unzip; then
+                    command -v unzip >/dev/null 2>&1 && return 0
+                fi
+            fi
+            ;;
+        macos)
+            if command -v brew >/dev/null 2>&1; then
+                if brew install unzip; then
+                    command -v unzip >/dev/null 2>&1 && return 0
+                fi
+            fi
+            ;;
+    esac
+
+    if command -v unzip >/dev/null 2>&1; then
+        return 0
+    fi
+    print_error "Could not install unzip automatically. Install manually (e.g. yum install -y unzip or apt-get install -y unzip)." >&2
+    return 1
+}
+
 # Obtain path to jdk zip (from cache or download). Echoes path on success.
 _bundled_jdk_acquire_zip() {
     local url="$1"
@@ -181,6 +292,10 @@ _bundled_jdk_acquire_zip() {
     local cached_file="${BUNDLED_JDK_CACHE_DIR}/${zip_name}"
 
     mkdir -p "$BUNDLED_JDK_CACHE_DIR" 2>/dev/null
+
+    if ! _bundled_ensure_unzip; then
+        return 1
+    fi
 
     if [ -f "$cached_file" ] && [ -s "$cached_file" ]; then
         if unzip -t "$cached_file" >/dev/null 2>&1; then
@@ -218,42 +333,12 @@ _bundled_jdk_acquire_zip() {
     return 0
 }
 
-# Nacos OSS ships jdk17-*.zip as a wrapper: one top-level *.tar.gz (plus optional __MACOSX).
-# After unzip, extract that tarball so bin/java appears under BUNDLED_JRE_ROOT.
-_bundled_maybe_unwrap_tar_gz_in_jre_root() {
-    local root="$1"
-    local tgz
-    tgz=$(find "$root" -maxdepth 1 -type f -name 'jdk*.tar.gz' 2>/dev/null | head -n 1)
-    if [ -z "$tgz" ]; then
-        tgz=$(find "$root" -maxdepth 1 -type f -name '*.tar.gz' 2>/dev/null | head -n 1)
-    fi
-    if [ -z "$tgz" ] || [ ! -f "$tgz" ]; then
-        return 1
-    fi
-    print_detail "Unpacking nested JDK tarball: $(basename "$tgz")" >&2
-    if ! command -v tar >/dev/null 2>&1; then
-        print_error "Command 'tar' is required to unpack the JDK .tar.gz inside the zip." >&2
-        return 1
-    fi
-    if ! tar -xzf "$tgz" -C "$root"; then
-        print_error "Failed to extract JDK tarball: $tgz" >&2
-        return 1
-    fi
-    rm -f "$tgz" 2>/dev/null || true
-    return 0
-}
-
 _download_extract_bundled_jre() {
     local url
     url=$(_bundled_jdk_resolve_url) || return 1
 
     local zip_path
     zip_path=$(_bundled_jdk_acquire_zip "$url") || return 1
-
-    if ! command -v unzip >/dev/null 2>&1; then
-        print_error "Command 'unzip' is required to extract the JDK archive."
-        return 1
-    fi
 
     mkdir -p "$BUNDLED_JRE_ROOT"
     rm -rf "${BUNDLED_JRE_ROOT:?}/"*
@@ -264,14 +349,7 @@ _download_extract_bundled_jre() {
         return 1
     fi
 
-    if _apply_bundled_java_home_from_root "$BUNDLED_JRE_ROOT"; then
-        print_detail "Bundled JDK ready: JAVA_HOME=$JAVA_HOME" >&2
-        return 0
-    fi
-
-    if ! _bundled_maybe_unwrap_tar_gz_in_jre_root "$BUNDLED_JRE_ROOT"; then
-        print_error "Extracted archive did not contain a usable Java 17+ under $BUNDLED_JRE_ROOT" >&2
-        print_error "Expected either bin/java in the zip or a top-level jdk*.tar.gz inside the zip." >&2
+    if ! _bundled_extract_inner_payload_if_needed "$BUNDLED_JRE_ROOT"; then
         return 1
     fi
 

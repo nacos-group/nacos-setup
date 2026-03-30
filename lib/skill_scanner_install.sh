@@ -392,12 +392,15 @@ _ensure_python_310_plus_with_uv() {
     # Do not use `uv -q python install`: on some uv versions -q can return before the
     # interpreter is fully materialized, and a later `uv -q venv --python <path>` then fails
     # with "No interpreter found" while verbose (non -q) works. Keep UI quiet via redirects + UV_NO_PROGRESS only.
-    # On Windows (MSYS / Git Bash) redirecting both stdout and stderr to /dev/null can cause
-    # the native uv.exe to fail; use a temp log file (same pattern as _create_skill_scanner_venv_with_uv).
-    if _skill_scanner_uv_use_quiet_output; then
-        local _py_logf="${TMPDIR:-/tmp}/nacos-setup-uv-python.$$.log"
-        : >"$_py_logf" 2>/dev/null || _py_logf=/dev/null
-        if _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 uv python install 3.10 >"$_py_logf" 2>&1; then
+    # Git Bash / MSYS: discarding all stdout/stderr (`>/dev/null`) often makes `uv python install` exit non-zero or
+    # leave no discoverable interpreter while the same command works when output goes to a TTY (matches --adv mode).
+    local quiet_py_install
+    quiet_py_install=0
+    if _skill_scanner_uv_use_quiet_output && ! _skill_scanner_is_windows_env; then
+        quiet_py_install=1
+    fi
+    if [ "$quiet_py_install" -eq 1 ]; then
+        if _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 uv python install 3.10 >/dev/null 2>&1; then
             py_install_ok=1
         fi
     else
@@ -414,16 +417,7 @@ _ensure_python_310_plus_with_uv() {
     if [ -n "$py_exe" ] && _skill_scanner_runas_target_user "$py_exe" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
         print_info "Python 3.10 ready: $py_exe" >&2
         printf '%s\n' "$py_exe"
-        if [ -n "${_py_logf:-}" ] && [ "$_py_logf" != /dev/null ]; then rm -f "$_py_logf"; fi
         return 0
-    fi
-
-    if [ -n "${_py_logf:-}" ] && [ "$_py_logf" != /dev/null ] && [ -s "$_py_logf" ]; then
-        print_warn "uv python install output:" >&2
-        while IFS= read -r _py_log_line || [ -n "$_py_log_line" ]; do
-            print_warn "  $_py_log_line" >&2
-        done < "$_py_logf"
-        rm -f "$_py_logf"
     fi
 
     return 1

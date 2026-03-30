@@ -153,7 +153,7 @@ _bundled_extract_inner_payload_if_needed() {
         return 0
     fi
 
-    print_detail "Extracting inner JDK archive: $(basename "$tg")" >&2
+    print_info "Extracting inner JDK archive: $(basename "$tg")"
     if ! command -v tar >/dev/null 2>&1; then
         print_error "Command 'tar' is required to extract the JDK tarball." >&2
         return 1
@@ -187,20 +187,27 @@ _bundled_jre_reuse_if_present() {
         return 1
     fi
     if _apply_bundled_java_home_from_root "$BUNDLED_JRE_ROOT"; then
-        print_detail "Using existing bundled JRE at JAVA_HOME=$JAVA_HOME" >&2
+        print_info "Using existing bundled JRE at JAVA_HOME=$JAVA_HOME"
         return 0
     fi
     return 1
 }
 
 _confirm_bundled_jre_install() {
-    if [ ! -t 0 ]; then
+    local confirm
+    local prompt="Java 17+ not found. Download JDK 17 from Nacos OSS into ${BUNDLED_JRE_ROOT} (cache: ${BUNDLED_JDK_CACHE_DIR})? (Y/n): "
+
+    if [ -t 0 ]; then
+        printf '\n' >&2
+        read -r -p "$prompt" confirm
+    elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf '\n' >&2
+        read -r -p "$prompt" confirm </dev/tty
+    else
         print_warn "Java 17+ is required for Nacos 3.x. Non-interactive shell: cannot prompt for bundled JDK download."
         print_warn "Install JDK 17+, set JAVA_HOME, or run nacos-setup in a terminal."
         return 1
     fi
-    local confirm
-    read -r -p "Java 17+ not found. Download JDK 17 from Nacos OSS into ${BUNDLED_JRE_ROOT} (cache: ${BUNDLED_JDK_CACHE_DIR})? (Y/n): " confirm
     if [[ "$confirm" =~ ^[Nn]$ ]]; then
         return 1
     fi
@@ -301,7 +308,7 @@ _bundled_jdk_acquire_zip() {
 
     if [ -f "$cached_file" ] && [ -s "$cached_file" ]; then
         if unzip -t "$cached_file" >/dev/null 2>&1; then
-            print_detail "Found cached JDK package: $cached_file" >&2
+            print_info "Found cached JDK package: $cached_file"
             printf '%s\n' "$cached_file"
             return 0
         fi
@@ -309,18 +316,18 @@ _bundled_jdk_acquire_zip() {
         rm -f "$cached_file"
     fi
 
-    print_detail "Downloading JDK 17: $url" >&2
-    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
+    print_info "Downloading JDK 17: $url"
+    if [ "$VERBOSE" = true ]; then echo ""; fi
 
     local curl_jdk_flag="-s"
     if [ "$VERBOSE" = true ]; then curl_jdk_flag="-#"; fi
     if ! curl -fL $curl_jdk_flag -o "$cached_file" "$url"; then
-        if [ "$VERBOSE" = true ]; then echo "" >&2; fi
+        if [ "$VERBOSE" = true ]; then echo ""; fi
         print_error "Failed to download JDK 17." >&2
         rm -f "$cached_file" 2>/dev/null || true
         return 1
     fi
-    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
+    if [ "$VERBOSE" = true ]; then echo ""; fi
 
     if ! unzip -t "$cached_file" >/dev/null 2>&1; then
         print_error "Downloaded file is not a valid zip: $cached_file" >&2
@@ -330,7 +337,7 @@ _bundled_jdk_acquire_zip() {
         return 1
     fi
 
-    print_detail "Download completed: $zip_name" >&2
+    print_info "Download completed: $zip_name"
     printf '%s\n' "$cached_file"
     return 0
 }
@@ -352,7 +359,7 @@ _download_extract_bundled_jre() {
     mkdir -p "$BUNDLED_JRE_ROOT"
     rm -rf "${BUNDLED_JRE_ROOT:?}/"*
 
-    print_detail "Extracting JDK into ${BUNDLED_JRE_ROOT}..." >&2
+    print_info "Extracting JDK into ${BUNDLED_JRE_ROOT}..."
     if ! unzip -q "$zip_path" -d "$BUNDLED_JRE_ROOT"; then
         print_error "Failed to extract JDK archive: $zip_path" >&2
         return 1
@@ -367,7 +374,7 @@ _download_extract_bundled_jre() {
         return 1
     fi
 
-    print_detail "Bundled JDK ready: JAVA_HOME=$JAVA_HOME" >&2
+    print_info "Bundled JDK ready: JAVA_HOME=$JAVA_HOME"
     return 0
 }
 

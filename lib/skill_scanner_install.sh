@@ -6,7 +6,7 @@
 
 # Optional Cisco skill-scanner (https://github.com/cisco-ai-defense/skill-scanner)
 # PyPI: cisco-ai-skill-scanner — requires Python 3.10+ and uv.
-# One interactive (Y/n) gate before any uv / Python / venv work; decline skips the whole stack.
+# Interactive (Y/n): (1) skill-scanner stack, (2) uv bootstrap when missing, (3) uv python 3.10 when missing.
 # stdin may be a pipe (curl | bash): prompt is read from /dev/tty when available; no usable TTY skips.
 # After Y: missing uv is bootstrapped via install.sh (curl/wget/fetch, else Python urllib / ruby / node); missing Python 3.10+ uses `uv python install 3.10`.
 # Simple UI (VERBOSE not true): installer uses UV_PRINT_QUIET; uv uses UV_NO_PROGRESS, -q/-qq, and stdout/stderr discarded where safe so progress spinners do not flood the console.
@@ -336,7 +336,11 @@ _skill_scanner_bootstrap_uv() {
         print_warn "Cannot auto-install uv: need curl, wget, fetch, Python, ruby, or node on PATH."
         return 1
     fi
-    print_detail "Installing uv (https://astral.sh/uv/) via official install script..."
+    if ! _confirm_uv_bootstrap_interactive; then
+        print_info "Skipping uv download/install."
+        return 1
+    fi
+    print_info "Installing uv (https://astral.sh/uv/) via official install script..."
     # Non-interactive-friendly; installs to ~/.local/bin by default on Unix.
     local q=0
     _skill_scanner_uv_use_quiet_output && q=1
@@ -349,7 +353,7 @@ _skill_scanner_bootstrap_uv() {
         print_warn "uv was installed but is not on PATH in this session. Open a new terminal or add ~/.local/bin to PATH."
         return 1
     fi
-    print_detail "uv is available: $(_skill_scanner_runas_target_user bash -c 'command -v uv')"
+    print_info "uv is available: $(_skill_scanner_runas_target_user bash -c 'command -v uv')"
     return 0
 }
 
@@ -377,8 +381,13 @@ _ensure_python_310_plus_with_uv() {
     fi
 
     # Fallback: uv-managed Python when system Python is missing or < 3.10.
-    # print_detail and uv must go to stderr: caller uses py_exe=$(this_func) and only stdout must be the interpreter path.
-    print_detail "No Python 3.10+ on PATH; installing Python 3.10 with uv..." >&2
+    # Prompts / status on stderr only: caller uses py_exe=$(this_func) and stdout must be the interpreter path.
+    print_info "No Python 3.10+ on PATH; uv can install Python 3.10." >&2
+    if ! _confirm_uv_python310_interactive; then
+        print_info "Skipping uv-managed Python 3.10." >&2
+        return 1
+    fi
+    print_info "Installing Python 3.10 with uv..." >&2
     local py_install_ok=0
     if _skill_scanner_uv_use_quiet_output; then
         if _skill_scanner_runas_target_user env UV_NO_PROGRESS=1 uv -q python install 3.10 >/dev/null 2>&1; then
@@ -461,10 +470,56 @@ _skill_scanner_installed_in_venv() {
     _skill_scanner_runas_target_user "$venv_python" -m pip show "$SKILL_SCANNER_PYPI_PACKAGE" >/dev/null 2>&1
 }
 
+# Confirm downloading and running Astral uv install.sh. Returns 0 if user accepts, 1 if decline or no TTY.
+_confirm_uv_bootstrap_interactive() {
+    local confirm
+    local prompt="uv is not on PATH. Download and install uv from Astral (https://astral.sh/uv/)? (Y/n): "
+
+    if [ -t 0 ]; then
+        printf '\n' >&2
+        read -r -p "$prompt" confirm
+    elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf '\n' >&2
+        read -r -p "$prompt" confirm </dev/tty
+    else
+        print_info "No interactive terminal: cannot prompt for uv installation."
+        return 1
+    fi
+    if [[ "$confirm" =~ ^[Nn]$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Confirm installing Python 3.10 via uv when none on PATH (stdout must stay clean for py_exe capture).
+_confirm_uv_python310_interactive() {
+    local confirm
+    local prompt="No Python 3.10+ on PATH. Install Python 3.10 with uv now? (Y/n): "
+
+    if [ -t 0 ]; then
+        printf '\n' >&2
+        read -r -p "$prompt" confirm
+    elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf '\n' >&2
+        read -r -p "$prompt" confirm </dev/tty
+    else
+        print_info "No interactive terminal: cannot prompt for uv-managed Python." >&2
+        return 1
+    fi
+    if [[ "$confirm" =~ ^[Nn]$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
 # Single gate before any uv / Python / venv / pip work. Returns 0 if user accepts, 1 if decline or no TTY.
+# Optional arg: current Nacos server version (for messaging only).
 _confirm_skill_scanner_uv_stack() {
+    local nacos_version="${1:-${VERSION:-}}"
     local confirm
     local prompt="Install Cisco skill-scanner stack (uv + Python 3.10+ under ~/ai-infra/.venv; missing tools will be installed)? (Y/n): "
+
+    print_info "Optional Cisco skill-scanner for Nacos ${nacos_version}: proceeding may install uv, Python 3.10+, and ${SKILL_SCANNER_PYPI_PACKAGE} under ~/ai-infra/.venv."
 
     if [ -t 0 ]; then
         printf '\n' >&2
@@ -532,7 +587,7 @@ maybe_install_skill_scanner_for_nacos() {
 
     if _skill_scanner_venv_python_exists "$venv_python" && _skill_scanner_installed_in_venv "$venv_python"; then
         SKILL_SCANNER_INSTALLED="true"
-        print_detail "skill-scanner already installed in ${venv_dir} (skip)."
+        print_info "skill-scanner already installed in ${venv_dir} (skip)."
         return 0
     fi
 
@@ -542,9 +597,7 @@ maybe_install_skill_scanner_for_nacos() {
         return 0
     fi
 
-    print_detail "Nacos ${nacos_version} >= ${MIN_NACOS_VERSION_FOR_SKILL_SCANNER}: optional Cisco skill-scanner (${SKILL_SCANNER_PYPI_PACKAGE})."
-
-    if ! _confirm_skill_scanner_uv_stack; then
+    if ! _confirm_skill_scanner_uv_stack "$nacos_version"; then
         print_info "Skipping skill-scanner / uv / Python setup. Continuing Nacos startup."
         return 0
     fi
@@ -562,7 +615,7 @@ maybe_install_skill_scanner_for_nacos() {
     }
 
     if ! _skill_scanner_venv_python_exists "$venv_python"; then
-        print_detail "Creating uv virtual environment in ${venv_dir}..."
+        print_info "Creating uv virtual environment in ${venv_dir}..."
         if ! _create_skill_scanner_venv_with_uv "$py_exe" "$venv_dir"; then
             print_warn "Could not create uv virtual environment at ${venv_dir}."
             print_warn "Docs: https://docs.astral.sh/uv/"
@@ -571,16 +624,16 @@ maybe_install_skill_scanner_for_nacos() {
         venv_python=$(_skill_scanner_venv_python_path "$venv_dir")
     fi
 
-    print_detail "Installing ${SKILL_SCANNER_PYPI_PACKAGE} into ${venv_dir} via uv..."
+    print_info "Installing ${SKILL_SCANNER_PYPI_PACKAGE} into ${venv_dir} via uv..."
     if _install_skill_scanner_uv_in_venv "$venv_python"; then
         SKILL_SCANNER_INSTALLED="true"
         if _skill_scanner_ensure_venv_bin_in_path "$venv_dir"; then
-            print_detail "Added ${venv_scripts} to PATH (current session and shell rc files)."
+            print_info "Added ${venv_scripts} to PATH (current session and shell rc files)."
         else
             print_warn "Installed successfully, but failed to persist PATH update. Please add ${venv_scripts} to PATH manually."
         fi
-        print_detail "Installed ${SKILL_SCANNER_PYPI_PACKAGE} in ${venv_dir}."
-        print_detail "Run with: $(_skill_scanner_venv_skill_scanner_path "$venv_dir")"
+        print_info "Installed ${SKILL_SCANNER_PYPI_PACKAGE} in ${venv_dir}."
+        print_info "Run with: $(_skill_scanner_venv_skill_scanner_path "$venv_dir")"
         return 0
     fi
 

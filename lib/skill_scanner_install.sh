@@ -276,11 +276,14 @@ run_post_nacos_config_skill_scanner_hook() {
 
 # Run the given command directly (no privilege changes).
 _skill_scanner_runas_target_user() {
+    # Ensure PATH is exported for child processes
+    export PATH
     "$@"
 }
 
 _skill_scanner_uv_on_path() {
-    _skill_scanner_runas_target_user bash -c 'command -v uv >/dev/null 2>&1'
+    # Pass current PATH to subshell to ensure uv is found after installation
+    _skill_scanner_runas_target_user env "PATH=$PATH" bash -c 'command -v uv >/dev/null 2>&1'
 }
 
 # True if we can download HTTPS to stdout (curl, wget, fetch, Python, ruby, or node).
@@ -362,7 +365,8 @@ _skill_scanner_prepend_path_dir() {
 # Ensure common install locations are visible after `uv/install.sh` (typically ~/.local/bin).
 _skill_scanner_refresh_path_for_uv() {
     local home
-    home=$(_skill_scanner_runas_target_user bash -c 'printf %s "$HOME"')
+    # Pass PATH to ensure command -v works in subshell
+    home=$(_skill_scanner_runas_target_user env "PATH=$PATH" bash -c 'printf %s "$HOME"')
     _skill_scanner_prepend_path_dir "${home}/.local/bin"
     _skill_scanner_prepend_path_dir "${home}/.cargo/bin"
 }
@@ -393,7 +397,7 @@ _skill_scanner_bootstrap_uv() {
         print_warn "uv was installed but is not on PATH in this session. Open a new terminal or add ~/.local/bin to PATH."
         return 1
     fi
-    print_info "uv is available: $(_skill_scanner_runas_target_user bash -c 'command -v uv')"
+    print_info "uv is available: $(_skill_scanner_runas_target_user env "PATH=$PATH" bash -c 'command -v uv')"
     return 0
 }
 
@@ -401,6 +405,7 @@ _find_python_310_plus() {
     local out
     # On Windows/Git Bash, also try common Python installation locations
     local extra_paths=""
+    local search_path="$PATH"
     if _skill_scanner_is_windows_env; then
         # Add common Windows Python locations to PATH for the search
         local win_paths=""
@@ -415,12 +420,12 @@ _find_python_310_plus() {
             done
         fi
         if [ -n "$win_paths" ]; then
-            extra_paths="export PATH=\"$win_paths:\$PATH\"; "
+            search_path="$win_paths:$PATH"
         fi
     fi
 
-    if ! out=$(_skill_scanner_runas_target_user bash -c '
-        '"$extra_paths"'
+    # Pass current PATH to subshell to ensure Python is found
+    if ! out=$(_skill_scanner_runas_target_user env "PATH=$search_path" bash -c '
         for c in python3.13 python3.12 python3.11 python3.10 python3; do
             if command -v "$c" >/dev/null 2>&1 && "$c" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
                 command -v "$c"
@@ -506,23 +511,59 @@ _ensure_python_310_plus_with_uv() {
 # Refresh PATH to include uv-managed Python locations (for after Python installation)
 _skill_scanner_refresh_path_for_uv_python() {
     local home
-    home=$(_skill_scanner_runas_target_user bash -c 'printf %s "$HOME"')
+    home=$(_skill_scanner_runas_target_user env "PATH=$PATH" bash -c 'printf %s "$HOME"')
+    _skill_scanner_trace "DEBUG _skill_scanner_refresh_path_for_uv_python: HOME=$home"
+
     # uv installs Python to ~/.local/share/uv/python on Unix
     # and %LOCALAPPDATA%\uv\python on Windows
     if _skill_scanner_is_windows_env; then
+        _skill_scanner_trace "DEBUG: Windows environment detected"
+
         # On Windows/Git Bash, also check Windows native paths
-        if [ -n "${LOCALAPPDATA:-}" ] && [ -d "$LOCALAPPDATA/uv/python" ]; then
-            _skill_scanner_prepend_path_dir "$LOCALAPPDATA/uv/python"
+        if [ -n "${LOCALAPPDATA:-}" ]; then
+            _skill_scanner_trace "DEBUG: LOCALAPPDATA=$LOCALAPPDATA"
+            if [ -d "$LOCALAPPDATA/uv/python" ]; then
+                _skill_scanner_trace "DEBUG: Adding $LOCALAPPDATA/uv/python to PATH"
+                _skill_scanner_prepend_path_dir "$LOCALAPPDATA/uv/python"
+            fi
+
+            # Also check for specific Python version directories
+            for py_dir in "$LOCALAPPDATA"/uv/python/cpython-3.10.*/install/bin \
+                          "$LOCALAPPDATA"/uv/python/cpython-3.10.*/install \
+                          "$LOCALAPPDATA"/uv/python/python3.10/bin; do
+                if [ -d "$py_dir" ]; then
+                    _skill_scanner_trace "DEBUG: Adding $py_dir to PATH"
+                    _skill_scanner_prepend_path_dir "$py_dir"
+                fi
+            done
         fi
+
         # Try to convert Windows path to Git Bash format
-        if [ -d "$home/.local/share/uv/python" ]; then
-            _skill_scanner_prepend_path_dir "$home/.local/share/uv/python"
+        local uv_python_dir="$home/.local/share/uv/python"
+        if [ -d "$uv_python_dir" ]; then
+            _skill_scanner_trace "DEBUG: Adding $uv_python_dir to PATH"
+            _skill_scanner_prepend_path_dir "$uv_python_dir"
+
+            # Look for bin directories within
+            for bin_dir in "$uv_python_dir"/*/bin "$uv_python_dir"/cpython-3.10.*/install/bin; do
+                if [ -d "$bin_dir" ]; then
+                    _skill_scanner_trace "DEBUG: Adding $bin_dir to PATH"
+                    _skill_scanner_prepend_path_dir "$bin_dir"
+                fi
+            done
         fi
     else
-        _skill_scanner_prepend_path_dir "$home/.local/share/uv/python"
+        local uv_python_dir="$home/.local/share/uv/python"
+        if [ -d "$uv_python_dir" ]; then
+            _skill_scanner_trace "DEBUG: Adding $uv_python_dir to PATH"
+            _skill_scanner_prepend_path_dir "$uv_python_dir"
+        fi
     fi
+
     # Also ensure uv itself is still on PATH
     _skill_scanner_refresh_path_for_uv
+
+    _skill_scanner_trace "DEBUG: PATH after refresh: $PATH"
 }
 
 # Verify Python 3.10+ with cross-platform support.
@@ -530,33 +571,84 @@ _skill_scanner_refresh_path_for_uv_python() {
 # On failure, prints nothing and returns 1.
 _skill_scanner_verify_python310() {
     local py_exe="$1"
-    [ -z "$py_exe" ] && return 1
+    _skill_scanner_trace "DEBUG _skill_scanner_verify_python310: input py_exe='$py_exe'"
+    [ -z "$py_exe" ] && { _skill_scanner_trace "DEBUG: empty input, returning 1"; return 1; }
+
+    # Check if the file exists and is executable
+    if [ -f "$py_exe" ]; then
+        _skill_scanner_trace "DEBUG: file exists at '$py_exe'"
+        if [ -x "$py_exe" ]; then
+            _skill_scanner_trace "DEBUG: file is executable"
+        else
+            _skill_scanner_trace "DEBUG: file is NOT executable (may still work on Windows)"
+        fi
+    else
+        _skill_scanner_trace "DEBUG: file does NOT exist at '$py_exe'"
+    fi
 
     # On Windows/Git Bash, the path might be in Windows format (C:\...)
     # Try to run it directly first
+    _skill_scanner_trace "DEBUG: trying direct execution: '$py_exe -c import sys...'"
     if _skill_scanner_runas_target_user "$py_exe" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
+        _skill_scanner_trace "DEBUG: direct execution succeeded"
         printf '%s\n' "$py_exe"
         return 0
     fi
+    _skill_scanner_trace "DEBUG: direct execution failed"
 
-    # If direct execution failed on Windows, try finding via PATH
+    # On Windows, try converting the path format
     if _skill_scanner_is_windows_env; then
-        # The path might be Windows-style; try finding python via PATH instead
+        _skill_scanner_trace "DEBUG: Windows env detected, trying path conversions"
+
+        # Try cygpath conversion if available
+        if command -v cygpath >/dev/null 2>&1; then
+            local cyg_path
+            cyg_path=$(cygpath -u "$py_exe" 2>/dev/null) || cyg_path=""
+            if [ -n "$cyg_path" ] && [ -f "$cyg_path" ]; then
+                _skill_scanner_trace "DEBUG: trying cygpath conversion: '$cyg_path'"
+                if _skill_scanner_runas_target_user "$cyg_path" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
+                    printf '%s\n' "$cyg_path"
+                    return 0
+                fi
+            fi
+        fi
+
+        # Try finding via PATH instead
         local py_from_path
-        py_from_path=$(_skill_scanner_runas_target_user bash -c 'command -v python3.10 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || true')
+        _skill_scanner_trace "DEBUG: searching for python in PATH..."
+        # Pass current PATH to subshell
+        py_from_path=$(_skill_scanner_runas_target_user env "PATH=$PATH" bash -c 'command -v python3.10 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || true')
+        _skill_scanner_trace "DEBUG: found in PATH: '$py_from_path'"
         if [ -n "$py_from_path" ]; then
             if _skill_scanner_runas_target_user "$py_from_path" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
+                _skill_scanner_trace "DEBUG: execution via PATH succeeded"
                 printf '%s\n' "$py_from_path"
                 return 0
             fi
+            _skill_scanner_trace "DEBUG: execution via PATH failed"
         fi
+
+        # Try common Windows Python locations
+        local home
+        home=$(_skill_scanner_runas_target_user env "PATH=$PATH" bash -c 'printf %s "$HOME"')
+        local common_locs="$home/.local/share/uv/python/python3.10/bin/python3 $home/.local/share/uv/python/cpython-3.10*/install/python.exe"
+        for loc in $common_locs; do
+            if [ -f "$loc" ]; then
+                _skill_scanner_trace "DEBUG: trying common location: '$loc'"
+                if _skill_scanner_runas_target_user "$loc" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
+                    printf '%s\n' "$loc"
+                    return 0
+                fi
+            fi
+        done
     fi
 
+    _skill_scanner_trace "DEBUG: all verification attempts failed"
     return 1
 }
 
 _skill_scanner_venv_dir_for_user() {
-    _skill_scanner_runas_target_user bash -c 'printf "%s/%s\n" "$HOME" "'"$SKILL_SCANNER_VENV_PATH_RELATIVE"'"'
+    _skill_scanner_runas_target_user env "PATH=$PATH" bash -c 'printf "%s/%s\n" "$HOME" "'"$SKILL_SCANNER_VENV_PATH_RELATIVE"'"'
 }
 
 _skill_scanner_warn_uv_venv_failed() {

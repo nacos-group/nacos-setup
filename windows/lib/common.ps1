@@ -5,6 +5,60 @@ $Global:ColorWarn = "Yellow"
 $Global:ColorError = "Red"
 $Global:ColorSuccess = "Green"
 
+# Align with bash nacos-setup.sh VERBOSE / print_detail
+$Global:NacosSetupVerbose = $false
+
+function Test-NacosSetupVerbose {
+    return ($Global:NacosSetupVerbose -eq $true) -or ($env:VERBOSE -eq "true")
+}
+
+function Write-Detail($msg) {
+    if (Test-NacosSetupVerbose) {
+        Write-Host "[INFO] $msg" -ForegroundColor $Global:ColorInfo
+    }
+}
+
+function Write-NacosSetupStepOk($current, $total, $desc, $result = "") {
+    if ($result) {
+        Write-Host "[$current/${total}] ${desc} ✓ ${result}" -ForegroundColor $Global:ColorSuccess
+    } else {
+        Write-Host "[$current/${total}] ${desc} ✓" -ForegroundColor $Global:ColorSuccess
+    }
+}
+
+function Write-NacosSetupStepFail($current, $total, $desc, $result = "failed") {
+    Write-Host "[$current/${total}] ${desc} ✗ ${result}" -ForegroundColor $Global:ColorError
+}
+
+$script:NacosSetupProgressSlot = 0
+function Start-NacosSetupStepProgress($current, $total, $desc) {
+    if (Test-NacosSetupVerbose) { return }
+    $pct = [math]::Min(100, [math]::Max(0, [int](100.0 * $current / $total)))
+    Write-Progress -Id $script:NacosSetupProgressSlot -Activity "Nacos Setup" -Status "[$current/$total] $desc" -PercentComplete $pct
+}
+
+function Stop-NacosSetupStepProgress() {
+    Write-Progress -Id $script:NacosSetupProgressSlot -Activity "Nacos Setup" -Completed
+}
+
+function Test-NacosSetupInteractive {
+    return [Environment]::UserInteractive -and ($Host.Name -notmatch "ISE")
+}
+
+# Required for Expand-Archive downloads / TLS mirrors bash check_system_commands (subset)
+function Test-WindowsNacosSetupPrerequisites {
+    Write-Detail "Checking required Windows capabilities..."
+    if (-not (Get-Command Expand-Archive -ErrorAction SilentlyContinue)) {
+        Write-ErrorMsg "Expand-Archive is not available (requires Windows PowerShell 5+)."
+        return $false
+    }
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    } catch {}
+    Write-Detail "Windows prerequisites OK"
+    return $true
+}
+
 function Get-LogTimestamp {
     return Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 }

@@ -81,7 +81,7 @@ function Allocate-StandalonePorts($basePort, $nacosVersion, $advancedMode, $allo
         } elseif (-not $advancedMode) {
             $serverPort = Find-AvailableNacosPort 18848
             if (-not $serverPort) { throw "No available port pair found" }
-            Write-Info "Auto-selected port: $serverPort"
+            Write-Detail "Auto-selected port: $serverPort"
         } else {
             throw "Port $serverPort unavailable"
         }
@@ -91,7 +91,7 @@ function Allocate-StandalonePorts($basePort, $nacosVersion, $advancedMode, $allo
     if (-not (Test-PortAvailable $grpcPort)) {
         $serverPort = Find-AvailableNacosPort ($serverPort + 1)
         if (-not $serverPort) { throw "No available port pair found" }
-        Write-Info "Reallocated to port pair: $serverPort"
+        Write-Detail "Reallocated to port pair: $serverPort"
     }
 
     if ($needConsole) {

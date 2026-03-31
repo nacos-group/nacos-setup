@@ -13,7 +13,11 @@ $script:SkillScannerVenvRelPath      = "ai-infra\.venv"
 $script:SkillScannerInstalled        = $false
 
 function Write-SkillScannerTrace($msg) {
-    if ($env:NACOS_DEBUG -eq "1") {
+    $verbose = $false
+    if (Get-Command Test-NacosSetupVerbose -ErrorAction SilentlyContinue) {
+        $verbose = Test-NacosSetupVerbose
+    }
+    if ($verbose -or $env:NACOS_DEBUG -eq "1") {
         Write-Host "[nacos-setup/skill-scanner] $msg" -ForegroundColor DarkGray
     }
 }
@@ -292,6 +296,12 @@ function Invoke-MaybeInstallSkillScannerForNacos($nacosVersion) {
         return
     }
 
+    # Environment summary (align with bash interactive skill-scanner flow)
+    Refresh-PathForUv
+    $hasUv = Test-UvOnPath
+    $hasPy = $null -ne (Find-Python310Plus)
+    Write-Info "Skill-scanner prerequisites: uv=$hasUv; Python 3.10+=$hasPy"
+
     # Prompt user
     Write-Info "Optional: Cisco skill-scanner for Nacos $nacosVersion"
     Write-Info "  This will install: uv + Python 3.10+ + $($script:SkillScannerPypiPackage) under ~/ai-infra/.venv"
@@ -306,11 +316,26 @@ function Invoke-MaybeInstallSkillScannerForNacos($nacosVersion) {
         return
     }
 
-    # Bootstrap uv
+    # Bootstrap uv (interactive Y/n, align with bash _confirm_uv_bootstrap_interactive)
     if (-not (Test-UvOnPath)) {
         Refresh-PathForUv
     }
     if (-not (Test-UvOnPath)) {
+        Write-Info "uv was not found on PATH."
+        $doUv = $false
+        if (Get-Command Test-NacosSetupInteractive -ErrorAction SilentlyContinue) {
+            if (Test-NacosSetupInteractive) {
+                try {
+                    $u = Read-Host "Download and install uv using the official installer? (Y/n)"
+                    if ($u -notmatch '^[Nn]') { $doUv = $true }
+                } catch { $doUv = $false }
+            }
+        }
+        if (-not $doUv) {
+            Write-Info "Skipping uv installation."
+            Write-Warn "Cannot install $($script:SkillScannerPypiPackage) without uv."
+            return
+        }
         if (-not (Install-Uv)) {
             Write-Warn "Cannot install $($script:SkillScannerPypiPackage) without uv."
             return

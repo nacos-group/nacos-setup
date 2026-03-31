@@ -585,30 +585,48 @@ install_nacos_cli() {
 }
 
 # ============================================================================
-# Verification
+# PATH: ensure ~/.nacos/bin is on PATH (shell rc + optional current session)
 # ============================================================================
 
-verify_installation() {
-    print_info "Verifying installation..."
-    
-    # Check if the symlink or file exists (use -e for both files and symlinks)
-    if [ ! -e "$BIN_DIR/$SCRIPT_NAME" ]; then
-        print_error "Installation failed: $BIN_DIR/$SCRIPT_NAME not found"
-        return 1
+# Resolve which rc file to append the PATH line to (macOS/Linux differ for bash).
+_resolve_shell_rc_for_path() {
+    local shell_config=""
+    if [ -n "$SHELL" ]; then
+        case "$SHELL" in
+            */zsh)
+                shell_config="$HOME/.zshrc"
+                ;;
+            */bash)
+                if [ -f "$HOME/.bashrc" ]; then
+                    shell_config="$HOME/.bashrc"
+                elif [ -f "$HOME/.bash_profile" ]; then
+                    shell_config="$HOME/.bash_profile"
+                elif [ -f "$HOME/.profile" ]; then
+                    shell_config="$HOME/.profile"
+                else
+                    shell_config="$HOME/.bashrc"
+                fi
+                ;;
+        esac
     fi
-    
-    # Check if the symlink target exists (resolve and check the actual target)
-    if [ -L "$BIN_DIR/$SCRIPT_NAME" ]; then
-        local link_path="$BIN_DIR/$SCRIPT_NAME"
-        # Follow the symlink to check if target is accessible
-        if [ ! -e "$link_path" ]; then
-            local target=$(readlink "$link_path")
-            print_error "Installation failed: Broken symlink at $link_path"
-            print_error "Target does not exist: $target"
-            return 1
+
+    if [ -z "$shell_config" ]; then
+        if [ -f "$HOME/.zshrc" ]; then
+            shell_config="$HOME/.zshrc"
+        elif [ -f "$HOME/.bashrc" ]; then
+            shell_config="$HOME/.bashrc"
+        elif [ -f "$HOME/.bash_profile" ]; then
+            shell_config="$HOME/.bash_profile"
+        elif [ -f "$HOME/.profile" ]; then
+            shell_config="$HOME/.profile"
+        else
+            shell_config="$HOME/.bashrc"
         fi
     fi
-    
+    printf '%s' "$shell_config"
+}
+
+ensure_nacos_bin_in_path() {
     # Check if BIN_DIR is already in PATH
     case ":$PATH:" in
         *":$BIN_DIR:"*)
@@ -617,30 +635,8 @@ verify_installation() {
         *)
             print_info "Configuring PATH automatically..."
 
-            # Detect shell configuration file
-            local shell_config=""
-            if [ -n "$SHELL" ]; then
-                case "$SHELL" in
-                    */zsh)
-                        shell_config="$HOME/.zshrc"
-                        ;;
-                    */bash)
-                        shell_config="$HOME/.bashrc"
-                        ;;
-                esac
-            fi
-
-            # Fallback: detect by checking which file exists
-            if [ -z "$shell_config" ]; then
-                if [ -f "$HOME/.zshrc" ]; then
-                    shell_config="$HOME/.zshrc"
-                elif [ -f "$HOME/.bashrc" ]; then
-                    shell_config="$HOME/.bashrc"
-                else
-                    # Create .bashrc if nothing exists
-                    shell_config="$HOME/.bashrc"
-                fi
-            fi
+            local shell_config
+            shell_config=$(_resolve_shell_rc_for_path)
 
             # Check if the export line already exists in the config file (idempotent)
             local path_export_line='export PATH="$HOME/.nacos/bin:$PATH"'
@@ -665,6 +661,34 @@ verify_installation() {
             fi
             ;;
     esac
+}
+
+# ============================================================================
+# Verification
+# ============================================================================
+
+verify_installation() {
+    print_info "Verifying installation..."
+    
+    # Check if the symlink or file exists (use -e for both files and symlinks)
+    if [ ! -e "$BIN_DIR/$SCRIPT_NAME" ]; then
+        print_error "Installation failed: $BIN_DIR/$SCRIPT_NAME not found"
+        return 1
+    fi
+    
+    # Check if the symlink target exists (resolve and check the actual target)
+    if [ -L "$BIN_DIR/$SCRIPT_NAME" ]; then
+        local link_path="$BIN_DIR/$SCRIPT_NAME"
+        # Follow the symlink to check if target is accessible
+        if [ ! -e "$link_path" ]; then
+            local target=$(readlink "$link_path")
+            print_error "Installation failed: Broken symlink at $link_path"
+            print_error "Target does not exist: $target"
+            return 1
+        fi
+    fi
+    
+    ensure_nacos_bin_in_path
     
     print_success "Installation verified successfully!"
     echo ""
@@ -891,8 +915,13 @@ main() {
 
     if [[ "$only_cli" == true ]]; then
         echo ""
-        install_nacos_cli
-        exit $?
+        if ! install_nacos_cli; then
+            exit 1
+        fi
+        echo ""
+        ensure_nacos_bin_in_path
+        print_info "Try: nacos-cli --help"
+        exit 0
     fi
 
     # Install nacos-setup

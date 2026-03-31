@@ -326,19 +326,23 @@ _bundled_jdk_acquire_zip() {
     fi
 
     print_detail "Downloading JDK 17: $url"
-    local curl_jdk_flag="-s"
+    # Non-verbose used curl -s; some hosts fail with -s while -# works (same as -x). Hide bar via 2>/dev/null; </dev/null avoids stdin reads.
     if [ "${VERBOSE:-false}" = true ]; then
-        curl_jdk_flag="-#"
         echo ""
+        if ! curl -fL -# -o "$cached_file" "$url" </dev/null; then
+            echo ""
+            print_error "Failed to download JDK 17." >&2
+            rm -f "$cached_file" 2>/dev/null || true
+            return 1
+        fi
+        echo ""
+    else
+        if ! curl -fL -# -o "$cached_file" "$url" </dev/null 2>/dev/null; then
+            print_error "Failed to download JDK 17." >&2
+            rm -f "$cached_file" 2>/dev/null || true
+            return 1
+        fi
     fi
-
-    if ! curl -fL $curl_jdk_flag -o "$cached_file" "$url"; then
-        if [ "${VERBOSE:-false}" = true ]; then echo ""; fi
-        print_error "Failed to download JDK 17." >&2
-        rm -f "$cached_file" 2>/dev/null || true
-        return 1
-    fi
-    if [ "${VERBOSE:-false}" = true ]; then echo ""; fi
 
     if ! unzip -t "$cached_file" >/dev/null 2>&1; then
         print_error "Downloaded file is not a valid zip: $cached_file" >&2

@@ -465,6 +465,23 @@ install_nacos_setup() {
 # nacos-cli Installation
 # ============================================================================
 
+# If /usr/local/bin is writable, symlink nacos-cli there so typical PATH (e.g. root)
+# includes the command immediately — subprocess installers cannot export PATH to the parent shell.
+_nacos_try_link_nacos_cli_system_symlink() {
+    local src="$1"
+    local dst="/usr/local/bin/nacos-cli"
+    [ -n "$src" ] && [ -f "$src" ] || return 0
+    if [ ! -d /usr/local/bin ]; then
+        mkdir -p /usr/local/bin 2>/dev/null || return 0
+    fi
+    if [ ! -w /usr/local/bin ]; then
+        return 0
+    fi
+    if ln -sf "$src" "$dst" 2>/dev/null; then
+        print_success "Linked nacos-cli to $dst (available in this shell without source ~/.bashrc)"
+    fi
+}
+
 install_nacos_cli() {
     local version="${NACOS_CLI_VERSION}"
 
@@ -567,6 +584,8 @@ install_nacos_cli() {
         print_warn "Failed to mark nacos-cli as executable: $BIN_DIR/$target_binary_name"
     fi
 
+    _nacos_try_link_nacos_cli_system_symlink "$BIN_DIR/$target_binary_name"
+
     # On macOS, add ad-hoc signature to avoid Gatekeeper killing the binary
     if [[ "$os" == "darwin" ]]; then
         if command -v codesign >/dev/null 2>&1; then
@@ -657,7 +676,9 @@ ensure_nacos_bin_in_path() {
             fi
 
             # Ask user whether to show / apply PATH for the current terminal
-            read -p "Show command to use nacos-cli in this terminal now? (Y/n): " -r REPLY
+            # With set -e, read must not fail the script on EOF (e.g. curl | bash).
+            REPLY=""
+            read -r -p "Show command to use nacos-cli in this terminal now? (Y/n): " REPLY || REPLY=y
             echo ""
             if [[ "$REPLY" =~ ^[Nn]$ ]]; then
                 print_info "To use nacos-cli later in this shell, run: source $shell_config"
@@ -802,6 +823,16 @@ uninstall_nacos_setup() {
     if [ -L "$BIN_DIR/$SCRIPT_NAME" ] || [ -f "$BIN_DIR/$SCRIPT_NAME" ]; then
         rm -f "$BIN_DIR/$SCRIPT_NAME"
         print_success "Removed $BIN_DIR/$SCRIPT_NAME"
+    fi
+
+    # Remove installer symlink in /usr/local/bin if it points to our nacos-cli
+    if [ -L /usr/local/bin/nacos-cli ]; then
+        local link_tgt
+        link_tgt=$(readlink /usr/local/bin/nacos-cli 2>/dev/null || true)
+        if [[ "$link_tgt" == "$BIN_DIR/nacos-cli" ]]; then
+            rm -f /usr/local/bin/nacos-cli
+            print_success "Removed /usr/local/bin/nacos-cli"
+        fi
     fi
 
     # Remove nacos-cli binary
@@ -961,7 +992,8 @@ main() {
     # Use server version from versions file or fallback
     detected_default_version="${NACOS_SERVER_VERSION:-$FALLBACK_NACOS_SERVER_VERSION}"
 
-    read -p "Do you want to install Nacos $detected_default_version now? (Y/n): " -r REPLY
+    REPLY=""
+    read -r -p "Do you want to install Nacos $detected_default_version now? (Y/n): " REPLY || REPLY=y
     echo ""
     if [[ "$REPLY" =~ ^[Yy]?$ ]] || [[ -z "$REPLY" ]]; then
         print_info "Installing Nacos $detected_default_version..."

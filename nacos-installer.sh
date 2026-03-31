@@ -28,27 +28,6 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Bash installer: Linux and macOS only (Windows: nacos-installer.ps1).
-abort_if_windows_bash_installer() {
-    local win=0
-    case "${OSTYPE:-}" in
-        msys*|cygwin*|win32*) win=1 ;;
-    esac
-    if [ "$win" -eq 0 ]; then
-        case "$(uname -s 2>/dev/null)" in
-            CYGWIN*|MINGW*|MSYS*|Windows_NT) win=1 ;;
-        esac
-    fi
-    if [ "$win" -eq 1 ]; then
-        print_error "This installer does not support Windows. Use PowerShell instead:"
-        echo ""
-        echo "  iwr -UseBasicParsing https://nacos.io/nacos-installer.ps1 | iex"
-        echo ""
-        exit 1
-    fi
-}
-abort_if_windows_bash_installer
-
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -491,7 +470,6 @@ install_nacos_cli() {
 
     print_info "Preparing to install nacos-cli version $version..."
 
-    # Detect OS (Linux / macOS only; Windows uses nacos-installer.ps1)
     local os=""
     if [[ "$OSTYPE" == "darwin"* ]]; then
         os="darwin"
@@ -811,11 +789,7 @@ main() {
     echo "  Nacos Setup Installer"
     echo "========================================"
     echo ""
-    echo "  macOS / Linux:"
     echo "    curl -fsSL https://nacos.io/nacos-installer.sh | bash"
-    echo ""
-    echo "  Windows (PowerShell):"
-    echo "    iwr -UseBasicParsing https://nacos.io/nacos-installer.ps1 | iex"
     echo ""
     echo "========================================"
     echo ""
@@ -864,11 +838,7 @@ main() {
                 echo "Install nacos-setup and nacos-cli tools for managing Nacos instances."
                 echo ""
                 echo "Usage:"
-                echo "  macOS / Linux:"
                 echo "    curl -fsSL https://nacos.io/nacos-installer.sh | bash"
-                echo ""
-                echo "  Windows (PowerShell):"
-                echo "    iwr -UseBasicParsing https://nacos.io/nacos-installer.ps1 | iex"
                 echo ""
                 echo "Options:"
                 echo "  (none)              Install nacos-setup + nacos-cli (default)"

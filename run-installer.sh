@@ -6,30 +6,8 @@
 
 set -euo pipefail
 
-# Match nacos-installer.sh colored [INFO] lines
 BLUE='\033[0;34m'
-RED='\033[0;31m'
 NC='\033[0m'
-
-abort_run_installer_on_windows() {
-    local win=0
-    case "${OSTYPE:-}" in
-        msys*|cygwin*|win32*) win=1 ;;
-    esac
-    if [ "$win" -eq 0 ]; then
-        case "$(uname -s 2>/dev/null)" in
-            CYGWIN*|MINGW*|MSYS*|Windows_NT) win=1 ;;
-        esac
-    fi
-    if [ "$win" -eq 1 ]; then
-        echo -e "${RED}[ERROR]${NC} run-installer.sh does not support Windows. Use PowerShell:" >&2
-        echo "" >&2
-        echo "  iwr -UseBasicParsing https://nacos.io/nacos-installer.ps1 | iex" >&2
-        echo "" >&2
-        exit 1
-    fi
-}
-abort_run_installer_on_windows
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALLER="$ROOT/nacos-installer.sh"

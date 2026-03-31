@@ -294,9 +294,9 @@ function New-Cluster {
         $nacosMajor = $Global:Version.Split('.')[0]
         if (Test-NacosSetupVerbose) {
             if ($nacosMajor -ge 3) {
-                Write-Info "  ✓ Server: $($nodeMainPorts[$i]) | Console: $($nodeConsolePorts[$i]) | gRPC: $($nodeMainPorts[$i]+1000),$($nodeMainPorts[$i]+1001) | Raft: $($nodeMainPorts[$i]-1000)"
+                Write-Info ('  OK Server: {0} | Console: {1} | gRPC: {2},{3} | Raft: {4}' -f $nodeMainPorts[$i], $nodeConsolePorts[$i], ($nodeMainPorts[$i]+1000), ($nodeMainPorts[$i]+1001), ($nodeMainPorts[$i]-1000))
             } else {
-                Write-Info "  ✓ Server: $($nodeMainPorts[$i]) | gRPC: $($nodeMainPorts[$i]+1000),$($nodeMainPorts[$i]+1001) | Raft: $($nodeMainPorts[$i]-1000)"
+                Write-Info ('  OK Server: {0} | gRPC: {1},{2} | Raft: {3}' -f $nodeMainPorts[$i], ($nodeMainPorts[$i]+1000), ($nodeMainPorts[$i]+1001), ($nodeMainPorts[$i]-1000))
             }
         }
     }

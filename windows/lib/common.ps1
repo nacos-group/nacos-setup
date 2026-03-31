@@ -19,15 +19,16 @@ function Write-Detail($msg) {
 }
 
 function Write-NacosSetupStepOk($current, $total, $desc, $result = "") {
+    # ASCII markers only: Unicode checkmarks break PS 5.1 when file is not saved as UTF-8 with BOM.
     if ($result) {
-        Write-Host "[$current/${total}] ${desc} ✓ ${result}" -ForegroundColor $Global:ColorSuccess
+        Write-Host ('[{0}/{1}] {2} OK {3}' -f $current, $total, $desc, $result) -ForegroundColor $Global:ColorSuccess
     } else {
-        Write-Host "[$current/${total}] ${desc} ✓" -ForegroundColor $Global:ColorSuccess
+        Write-Host ('[{0}/{1}] {2} OK' -f $current, $total, $desc) -ForegroundColor $Global:ColorSuccess
     }
 }
 
 function Write-NacosSetupStepFail($current, $total, $desc, $result = "failed") {
-    Write-Host "[$current/${total}] ${desc} ✗ ${result}" -ForegroundColor $Global:ColorError
+    Write-Host ('[{0}/{1}] {2} FAILED {3}' -f $current, $total, $desc, $result) -ForegroundColor $Global:ColorError
 }
 
 $script:NacosSetupProgressSlot = 0
@@ -141,11 +142,12 @@ function Update-ConfigProperty($configFile, $key, $value) {
     # Match both commented (#key=value) and uncommented (key=value) lines
     $pattern = "(?m)^#?\s*" + [Regex]::Escape($key) + "\s*=.*$"
     if ($lines -match $pattern) {
-        # Replace with uncommented version
-        $lines = [Regex]::Replace($lines, $pattern, "$key=$value")
+        # Replace with uncommented version (avoid "$key=$value`n" parsing edge cases in PS 5.1)
+        $lines = [Regex]::Replace($lines, $pattern, ('{0}={1}' -f $key, $value))
     } else {
-        if (-not $lines.EndsWith("`n")) { $lines += "`n" }
-        $lines += "$key=$value`n"
+        $nl = [Environment]::NewLine
+        if (-not $lines.EndsWith($nl)) { $lines += $nl }
+        $lines += ('{0}={1}{2}' -f $key, $value, $nl)
     }
     Set-Content -Path $configFile -Value $lines -Encoding UTF8
 }

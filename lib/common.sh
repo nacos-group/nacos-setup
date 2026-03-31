@@ -37,6 +37,27 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Bash entrypoints (nacos-setup.sh, nacos-installer.sh) support Linux and macOS only.
+# Windows: use windows/nacos-installer.ps1 and windows/nacos-setup.ps1.
+nacos_setup_require_unix_os() {
+    local win=0
+    case "${OSTYPE:-}" in
+        msys*|cygwin*|win32*) win=1 ;;
+    esac
+    if [ "$win" -eq 0 ]; then
+        case "$(uname -s 2>/dev/null)" in
+            CYGWIN*|MINGW*|MSYS*|Windows_NT) win=1 ;;
+        esac
+    fi
+    if [ "$win" -eq 1 ]; then
+        print_error "This script does not support Windows. Use PowerShell instead:"
+        echo ""
+        echo "  iwr -UseBasicParsing https://nacos.io/nacos-installer.ps1 | iex"
+        echo ""
+        exit 1
+    fi
+}
+
 # ============================================================================
 # Verbose Output Control
 # ============================================================================
@@ -215,9 +236,6 @@ detect_os_arch() {
         Darwin*)
             os_type="macos"
             ;;
-        CYGWIN*|MINGW*|MSYS*)
-            os_type="windows"
-            ;;
     esac
     
     echo "$os_type"
@@ -346,13 +364,6 @@ get_java_search_paths() {
                 "/System/Library/Frameworks/JavaVM.framework"
                 "$HOME/.sdkman/candidates/java"
                 "$HOME/.jenv/versions"
-            )
-            ;;
-        windows)
-            paths=(
-                "/c/Program Files/Java"
-                "/c/Program Files/OpenJDK"
-                "$HOME/.sdkman/candidates/java"
             )
             ;;
         *)

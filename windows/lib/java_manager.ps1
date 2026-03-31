@@ -1,6 +1,15 @@
 # Java management for Windows nacos-setup
 . $PSScriptRoot\common.ps1
 
+$script:JDK17OssBase    = "https://download.nacos.io/base"
+$script:BundledJreCache = if ($env:NACOS_CACHE_DIR) { $env:NACOS_CACHE_DIR } else { Join-Path $env:USERPROFILE ".nacos\cache" }
+$script:BundledJreRoot  = if ($env:NACOS_SETUP_BUNDLED_JRE_DIR) {
+    $env:NACOS_SETUP_BUNDLED_JRE_DIR
+} else {
+    $userBase = if ($env:REAL_USER_PROFILE) { $env:REAL_USER_PROFILE } elseif ($env:USERPROFILE) { $env:USERPROFILE } else { "." }
+    Join-Path $userBase "ai-infra\nacos\.bundled-jre-17"
+}
+
 function Write-DebugLog($msg) {
     if ($env:NACOS_DEBUG -eq "1") { Write-Info "[DEBUG] $msg" }
 }
@@ -114,4 +123,161 @@ function Get-JavaRuntimeOptions {
         }
     } catch {}
     return ""
+}
+
+# ============================================================================
+# Bundled JRE 17 support for Nacos 3.x when no Java 17+ is available
+# ============================================================================
+
+function Get-WindowsArch {
+    $arch = $env:PROCESSOR_ARCHITECTURE
+    switch ($arch) {
+        "AMD64"   { return "amd64" }
+        "ARM64"   { return "amd64" }  # Use AMD64 JDK via emulation on ARM64 Windows
+        "x86"     { return $null }    # 32-bit not supported
+        default   { return "amd64" }
+    }
+}
+
+function Get-BundledJdkUrl {
+    if ($env:NACOS_SETUP_JRE17_DOWNLOAD_URL) {
+        return $env:NACOS_SETUP_JRE17_DOWNLOAD_URL
+    }
+    $arch = Get-WindowsArch
+    if (-not $arch) {
+        Write-Warn "32-bit Windows is not supported for bundled JDK"
+        return $null
+    }
+    return "$script:JDK17OssBase/jdk17-windows-$arch.zip"
+}
+
+function Find-JavaBinaryInDir($root) {
+    if (-not (Test-Path $root)) { return $null }
+    $hits = Get-ChildItem -Path $root -Recurse -Filter "java.exe" -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match '\\bin\\java\.exe$' } |
+        Select-Object -First 1
+    if ($hits) { return $hits.FullName }
+    return $null
+}
+
+function Apply-BundledJavaHomeFromDir($root) {
+    $javaBin = Find-JavaBinaryInDir $root
+    if (-not $javaBin) { return $false }
+    $ver = Get-JavaVersion $javaBin
+    if ($ver -lt 17) { return $false }
+    $javaHome = Split-Path (Split-Path $javaBin -Parent) -Parent
+    $env:JAVA_HOME = $javaHome
+    $env:PATH = "$javaHome\bin;$env:PATH"
+    Write-DebugLog "Set JAVA_HOME=$javaHome"
+    return $true
+}
+
+function Test-BundledJrePresent {
+    $root = $script:BundledJreRoot
+    if (-not (Test-Path $root)) { return $false }
+    return (Apply-BundledJavaHomeFromDir $root)
+}
+
+function Install-BundledJre17 {
+    $url = Get-BundledJdkUrl
+    if (-not $url) { return $false }
+
+    $zipName  = [System.IO.Path]::GetFileName(($url -split '\?')[0])
+    if (-not $zipName) { $zipName = "jdk17-windows-amd64.zip" }
+    $cached   = Join-Path $script:BundledJreCache $zipName
+
+    Ensure-Directory $script:BundledJreCache
+
+    $needDownload = $true
+    if ((Test-Path $cached) -and (Get-Item $cached).Length -gt 0) {
+        Write-Info "Found cached JDK package: $cached"
+        $needDownload = $false
+    }
+
+    if ($needDownload) {
+        Write-Info "Downloading JDK 17: $url"
+        try {
+            if ($PSVersionTable.PSVersion.Major -lt 6) {
+                Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $cached
+            } else {
+                Invoke-WebRequest -Uri $url -OutFile $cached
+            }
+        } catch {
+            Write-Warn "Failed to download bundled JDK 17: $($_.Exception.Message)"
+            Remove-Item $cached -ErrorAction SilentlyContinue
+            return $false
+        }
+    }
+
+    $root = $script:BundledJreRoot
+    if (Test-Path $root) { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
+    Ensure-Directory $root
+
+    Write-Info "Extracting JDK 17 into $root..."
+    try {
+        Expand-Archive -Path $cached -DestinationPath $root -Force
+    } catch {
+        Write-Warn "Failed to extract JDK 17: $($_.Exception.Message)"
+        return $false
+    }
+
+    if (Apply-BundledJavaHomeFromDir $root) {
+        Write-Info "Bundled JDK 17 ready: JAVA_HOME=$env:JAVA_HOME"
+        return $true
+    }
+    Write-Warn "Extracted archive does not contain a usable Java 17 binary"
+    return $false
+}
+
+# Prompt user (Y/n) for bundled JRE download.
+# Returns $true if user accepts, $false if declined or non-interactive.
+function Confirm-BundledJreInstall {
+    $prompt = "Java 17+ not found. Download JDK 17 from Nacos OSS into $($script:BundledJreRoot)? (Y/n): "
+    try {
+        $answer = Read-Host $prompt
+        if ($answer -match '^[Nn]') { return $false }
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+# Main entry: ensure Java 17+ is available for Nacos 3.x.
+# Returns $true if Java 17+ is ready, $false if not (caller should exit).
+function Ensure-BundledJava17ForNacosSetup($nacosVersion) {
+    if ($env:NACOS_SETUP_SKIP_BUNDLED_JRE -in @("1","true","TRUE")) { return $true }
+
+    $major = 0
+    if ($nacosVersion) {
+        try { $major = [int]($nacosVersion -replace '[^0-9].*$','').Split('.')[0] } catch {}
+    }
+    if ($major -lt 3) { return $true }  # Nacos 2.x needs only Java 8+
+
+    # Check if Java 17+ already on system
+    $javaCmd = $null
+    if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) {
+        $javaCmd = Join-Path $env:JAVA_HOME "bin\java.exe"
+    }
+    if (-not $javaCmd) {
+        $found = Get-Command java -ErrorAction SilentlyContinue
+        if ($found) { $javaCmd = $found.Source }
+    }
+    if ($javaCmd -and (Get-JavaVersion $javaCmd) -ge 17) {
+        Write-DebugLog "Java 17+ already available: $javaCmd"
+        return $true
+    }
+
+    # Try reusing cached bundled JRE
+    if (Test-BundledJrePresent) {
+        Write-Info "Using existing bundled JRE at JAVA_HOME=$env:JAVA_HOME"
+        return $true
+    }
+
+    Write-Info "Nacos $nacosVersion requires Java 17+. None found in JAVA_HOME or PATH."
+    if (-not (Confirm-BundledJreInstall)) {
+        Write-Info "Skipping bundled JDK installation. Exiting without starting Nacos setup."
+        return $false
+    }
+
+    return (Install-BundledJre17)
 }

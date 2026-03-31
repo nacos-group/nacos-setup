@@ -97,6 +97,10 @@ $libFiles = @(
     "cluster.ps1"
 )
 
+$optionalLibFiles = @(
+    "skill_scanner_install.ps1"
+)
+
 foreach ($libFile in $libFiles) {
     $libFilePath = Join-Path $libPath $libFile
     if (Test-Path $libFilePath) {
@@ -105,6 +109,11 @@ foreach ($libFile in $libFiles) {
         Write-ErrorMsg "Failed to load library: $libFile from $libFilePath"
         exit 1
     }
+}
+
+foreach ($libFile in $optionalLibFiles) {
+    $libFilePath = Join-Path $libPath $libFile
+    if (Test-Path $libFilePath) { . $libFilePath }
 }
 
 # =============================
@@ -723,6 +732,14 @@ try {
     }
 
     Validate-Arguments
+
+    # Bundled JRE check for Nacos 3.x: download from OSS when Java 17+ is missing
+    if (Get-Command Ensure-BundledJava17ForNacosSetup -ErrorAction SilentlyContinue) {
+        if (-not (Ensure-BundledJava17ForNacosSetup $Global:Version)) {
+            Write-Info "Exiting: Java 17+ is required for Nacos $($Global:Version)."
+            exit 0
+        }
+    }
 
     switch ($Global:Mode) {
         "standalone" { Run-Standalone }

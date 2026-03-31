@@ -28,6 +28,27 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Bash installer: Linux and macOS only (Windows: nacos-installer.ps1).
+abort_if_windows_bash_installer() {
+    local win=0
+    case "${OSTYPE:-}" in
+        msys*|cygwin*|win32*) win=1 ;;
+    esac
+    if [ "$win" -eq 0 ]; then
+        case "$(uname -s 2>/dev/null)" in
+            CYGWIN*|MINGW*|MSYS*|Windows_NT) win=1 ;;
+        esac
+    fi
+    if [ "$win" -eq 1 ]; then
+        print_error "This installer does not support Windows. Use PowerShell instead:"
+        echo ""
+        echo "  iwr -UseBasicParsing https://nacos.io/nacos-installer.ps1 | iex"
+        echo ""
+        exit 1
+    fi
+}
+abort_if_windows_bash_installer
+
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -470,24 +491,19 @@ install_nacos_cli() {
 
     print_info "Preparing to install nacos-cli version $version..."
 
-    # Detect OS
+    # Detect OS (Linux / macOS only; Windows uses nacos-installer.ps1)
     local os=""
     if [[ "$OSTYPE" == "darwin"* ]]; then
         os="darwin"
     elif [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "linux"* ]]; then
         os="linux"
-    elif [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "cygwin"* ]] || [[ "$OSTYPE" == "win32"* ]]; then
-        os="windows"
     else
-        # Try using uname as fallback
         local uname_os
         uname_os=$(uname -s 2>/dev/null || echo "")
         if [[ "$uname_os" == "Darwin" ]]; then
             os="darwin"
         elif [[ "$uname_os" == "Linux" ]]; then
             os="linux"
-        elif [[ "$uname_os" == MINGW* ]] || [[ "$uname_os" == MSYS* ]] || [[ "$uname_os" == CYGWIN* ]]; then
-            os="windows"
         else
             print_warn "Unsupported OS for nacos-cli: $OSTYPE (uname: $uname_os)"
             return 1
@@ -539,35 +555,17 @@ install_nacos_cli() {
         return 1
     fi
 
-    # Expected binary filename: nacos-cli-{version}-{os}-{arch} or nacos-cli-{version}-{os}-{arch}.exe
+    # Expected binary: nacos-cli-{version}-{os}-{arch}
     local expected_binary_name="nacos-cli-${version}-${os}-${arch}"
     local expected_binary_name_exe="${expected_binary_name}.exe"
     local binary_path
-    
-    # For Windows, prioritize .exe files; for others, prioritize files without extension
-    if [[ "$os" == "windows" ]]; then
-        # Try .exe first for Windows
+    binary_path=$(find "$tmp_dir" -name "$expected_binary_name" -type f | head -1)
+    if [ -z "$binary_path" ]; then
         binary_path=$(find "$tmp_dir" -name "$expected_binary_name_exe" -type f | head -1)
-        # Fallback to non-.exe (shouldn't happen, but just in case)
-        if [ -z "$binary_path" ]; then
-            binary_path=$(find "$tmp_dir" -name "$expected_binary_name" -type f | head -1)
-        fi
-    else
-        # For non-Windows, try without .exe first
-        binary_path=$(find "$tmp_dir" -name "$expected_binary_name" -type f | head -1)
-        # Fallback to .exe (shouldn't happen, but just in case)
-        if [ -z "$binary_path" ]; then
-            binary_path=$(find "$tmp_dir" -name "$expected_binary_name_exe" -type f | head -1)
-        fi
     fi
 
     if [ -z "$binary_path" ] || [ ! -f "$binary_path" ]; then
-        local expected_names="$expected_binary_name"
-        if [[ "$os" == "windows" ]]; then
-            expected_names="$expected_binary_name_exe (or $expected_binary_name)"
-        else
-            expected_names="$expected_binary_name (or $expected_binary_name_exe)"
-        fi
+        local expected_names="$expected_binary_name (or $expected_binary_name_exe)"
         print_error "Binary file not found in package. Expected: $expected_names"
         print_info "Available files in package:"
         find "$tmp_dir" -type f | sed 's|^|  |'
@@ -578,11 +576,7 @@ install_nacos_cli() {
     # Ensure bin dir exists
     mkdir -p "$BIN_DIR"
 
-    # Determine target binary name (add .exe for Windows)
     local target_binary_name="nacos-cli"
-    if [[ "$os" == "windows" ]]; then
-        target_binary_name="nacos-cli.exe"
-    fi
 
     # Install binary
     if ! cp "$binary_path" "$BIN_DIR/$target_binary_name"; then
@@ -591,12 +585,8 @@ install_nacos_cli() {
         return 1
     fi
 
-    # Set executable permission (not needed on Windows, but harmless)
     if ! chmod +x "$BIN_DIR/$target_binary_name" 2>/dev/null; then
-        # On Windows, chmod might fail, which is fine
-        if [[ "$os" != "windows" ]]; then
-            print_warn "Failed to mark nacos-cli as executable: $BIN_DIR/$target_binary_name"
-        fi
+        print_warn "Failed to mark nacos-cli as executable: $BIN_DIR/$target_binary_name"
     fi
 
     # On macOS, add ad-hoc signature to avoid Gatekeeper killing the binary
@@ -821,6 +811,14 @@ main() {
     echo "  Nacos Setup Installer"
     echo "========================================"
     echo ""
+    echo "  macOS / Linux:"
+    echo "    curl -fsSL https://nacos.io/nacos-installer.sh | bash"
+    echo ""
+    echo "  Windows (PowerShell):"
+    echo "    iwr -UseBasicParsing https://nacos.io/nacos-installer.ps1 | iex"
+    echo ""
+    echo "========================================"
+    echo ""
 
     # Initialize versions (fetch from remote or use fallback)
     get_all_versions 1
@@ -863,9 +861,14 @@ main() {
                 shift 2
                 ;;
             --help|-h)
-                echo "Usage: curl -fsSL https://nacos.io/installer.sh | bash"
-                echo ""
                 echo "Install nacos-setup and nacos-cli tools for managing Nacos instances."
+                echo ""
+                echo "Usage:"
+                echo "  macOS / Linux:"
+                echo "    curl -fsSL https://nacos.io/nacos-installer.sh | bash"
+                echo ""
+                echo "  Windows (PowerShell):"
+                echo "    iwr -UseBasicParsing https://nacos.io/nacos-installer.ps1 | iex"
                 echo ""
                 echo "Options:"
                 echo "  (none)              Install nacos-setup + nacos-cli (default)"

@@ -21,21 +21,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 # ============================================================================
-# Platform Detection
-# ============================================================================
-
-# Detect Windows environment (Git Bash, MSYS, Cygwin)
-_is_windows_env() {
-    case "${OSTYPE:-}" in
-        cygwin|msys|win32) return 0 ;;
-    esac
-    case "$(uname -s 2>/dev/null)" in
-        CYGWIN*|MINGW*|MSYS*|Windows_NT) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-# ============================================================================
 # Port Availability Check
 # ============================================================================
 
@@ -43,26 +28,7 @@ _is_windows_env() {
 # Returns: 0 if available, 1 if in use
 check_port_available() {
     local port=$1
-    
-    if _is_windows_env; then
-        # Windows / Git Bash: use netstat or PowerShell
-        if command -v netstat >/dev/null 2>&1; then
-            if netstat -an 2>/dev/null | grep -E "[:.]${port}[[:space:]]" | grep -q "LISTEN"; then
-                return 1  # Port is in use
-            fi
-        fi
-        # Try PowerShell if available (more reliable on modern Windows)
-        if command -v powershell >/dev/null 2>&1; then
-            if powershell -Command "\$p = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if(\$p) { exit 1 } else { exit 0 }" 2>/dev/null; then
-                return 0
-            else
-                return 1
-            fi
-        fi
-        return 0  # Assume available if we can't detect
-    fi
 
-    # Linux / macOS original logic (kept unchanged)
     if command -v lsof &> /dev/null; then
         # Use lsof if available (most reliable)
         if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then

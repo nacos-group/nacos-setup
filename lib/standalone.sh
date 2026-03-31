@@ -292,9 +292,7 @@ run_standalone_mode() {
                 print_warn "Nacos process terminated unexpectedly"
                 STARTED_NACOS_PID=""
             else
-                # Windows Git Bash may fail to resolve Java PID; keep terminal attached
-                # so users launched from shortcut don't lose the session immediately.
-                print_warn "PID not detected on this platform. Nacos may still be running."
+                print_warn "PID not detected. Nacos may still be running."
                 print_info "Press Ctrl+C to exit this terminal (Nacos will keep running)."
                 while true; do
                     sleep 60

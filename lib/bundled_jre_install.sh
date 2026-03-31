@@ -45,12 +45,6 @@ _java17_already_on_system() {
             return 0
         fi
     fi
-    # Windows Git Bash: java.exe under JAVA_HOME/bin
-    if [ -n "${JAVA_HOME:-}" ] && [ -f "${JAVA_HOME}/bin/java.exe" ]; then
-        if _java_major_at_least_17 "${JAVA_HOME}/bin/java.exe"; then
-            return 0
-        fi
-    fi
     if command -v java >/dev/null 2>&1; then
         if _java_major_at_least_17 java; then
             return 0
@@ -59,12 +53,11 @@ _java17_already_on_system() {
     return 1
 }
 
-# Map detect_os_arch -> OSS path segment (darwin | linux | windows)
+# Map detect_os_arch -> OSS path segment (darwin | linux)
 _bundled_jdk_os_segment() {
     case "$(detect_os_arch)" in
         macos) echo darwin ;;
         linux) echo linux ;;
-        windows) echo windows ;;
         *) echo unknown ;;
     esac
 }
@@ -95,13 +88,9 @@ _bundled_jdk_resolve_url() {
 
     # Published matrix (see download.nacos.io/base)
     case "${os}-${arch}" in
-        darwin-amd64 | darwin-arm64 | linux-amd64 | windows-amd64) ;;
+        darwin-amd64 | darwin-arm64 | linux-amd64) ;;
         linux-arm64)
             print_error "No bundled JDK 17 package for linux-arm64. Install JDK 17 manually and retry." >&2
-            return 1
-            ;;
-        windows-arm64)
-            print_error "No bundled JDK 17 package for windows-arm64. Install JDK 17 manually and retry." >&2
             return 1
             ;;
         *)
@@ -119,18 +108,14 @@ _bundled_find_java_binary() {
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         case "$f" in
-            */bin/java | */bin/java.exe | */Contents/Home/bin/java)
+            */bin/java | */Contents/Home/bin/java)
                 if [ -x "$f" ]; then
-                    printf '%s\n' "$f"
-                    return 0
-                fi
-                if [[ "$f" == *.exe ]] && [ -f "$f" ]; then
                     printf '%s\n' "$f"
                     return 0
                 fi
                 ;;
         esac
-    done < <(find "$root" -type f \( -name java -o -name java.exe \) 2>/dev/null)
+    done < <(find "$root" -type f -name java 2>/dev/null)
     return 1
 }
 
@@ -172,7 +157,7 @@ _apply_bundled_java_home_from_root() {
     if ! _java_major_at_least_17 "$java_bin"; then
         return 1
     fi
-    # .../bin/java or .../bin/java.exe -> JDK/JRE root; .../Contents/Home/bin/java -> JAVA_HOME = .../Home
+    # .../bin/java -> JDK/JRE root; .../Contents/Home/bin/java -> JAVA_HOME = .../Home
     JAVA_HOME="$(dirname "$(dirname "$java_bin")")"
     export JAVA_HOME
     export PATH="${JAVA_HOME}/bin:${PATH}"

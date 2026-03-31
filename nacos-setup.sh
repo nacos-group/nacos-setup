@@ -67,6 +67,7 @@ if [ ! -f "$LIB_DIR/common.sh" ]; then
     exit 1
 fi
 source "$LIB_DIR/common.sh"
+nacos_setup_require_unix_os
 
 # ============================================================================
 # Load Version Management

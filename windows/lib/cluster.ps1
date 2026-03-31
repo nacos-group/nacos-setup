@@ -23,6 +23,8 @@ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$scriptPath\java_manager.ps1"
 . "$scriptPath\process_manager.ps1"
 . "$scriptPath\data_import.ps1"
+$_ssLib = Join-Path $scriptPath "skill_scanner_install.ps1"
+if (Test-Path $_ssLib) { . $_ssLib }
 
 # ============================================================================
 # Global Variables
@@ -279,7 +281,21 @@ function New-Cluster {
         Remove-Item "$configFile.bak" -ErrorAction SilentlyContinue
         Write-Info "  Importing default agentspec / skill data into $nodeDir\data..."
         Invoke-PostNacosConfigDataImportHook $nodeDir
-        
+
+        if ($i -eq 0) {
+            # skill-scanner: install once for the cluster, configure on first node
+            if (Get-Command Invoke-PostNacosConfigSkillScannerHook -ErrorAction SilentlyContinue) {
+                Invoke-PostNacosConfigSkillScannerHook $Global:Version
+            }
+        }
+        if (Get-Command Test-ShouldWriteSkillScannerPluginConfig -ErrorAction SilentlyContinue) {
+            if (Test-ShouldWriteSkillScannerPluginConfig $Global:Version) {
+                if (Get-Command Set-SkillScannerProperties -ErrorAction SilentlyContinue) {
+                    Set-SkillScannerProperties $configFile
+                }
+            }
+        }
+
         $nacosMajor = $Global:Version.Split('.')[0]
         if ($nacosMajor -ge 3) {
             Write-Info "  ✓ Server: $($nodeMainPorts[$i]) | Console: $($nodeConsolePorts[$i]) | gRPC: $($nodeMainPorts[$i]+1000),$($nodeMainPorts[$i]+1001) | Raft: $($nodeMainPorts[$i]-1000)"
@@ -622,7 +638,15 @@ function Join-ClusterMode {
     Write-Info "Post-config: importing default agentspec / skill data into $newNodeDir\data..."
     Invoke-PostNacosConfigDataImportHook $newNodeDir
     Write-Host ""
-    
+
+    if (Get-Command Test-ShouldWriteSkillScannerPluginConfig -ErrorAction SilentlyContinue) {
+        if (Test-ShouldWriteSkillScannerPluginConfig $Global:Version) {
+            if (Get-Command Set-SkillScannerProperties -ErrorAction SilentlyContinue) {
+                Set-SkillScannerProperties (Join-Path $newNodeDir "conf\application.properties")
+            }
+        }
+    }
+
     # Update cluster.conf in existing nodes
     Write-Info "Updating cluster.conf in existing nodes..."
     foreach ($existingNode in $existingNodes) {

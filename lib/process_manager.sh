@@ -27,16 +27,6 @@ _pm_debug() {
     fi
 }
 
-_pm_is_windows_env() {
-    case "${OSTYPE:-}" in
-        cygwin|msys|win32) return 0 ;;
-    esac
-    case "$(uname -s 2>/dev/null)" in
-        CYGWIN*|MINGW*|MSYS*|Windows_NT) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
 # Read PID from Nacos PID file or parse from startup log.
 _pm_read_nacos_pid() {
     local install_dir=$1
@@ -74,111 +64,18 @@ _pm_read_nacos_pid() {
     return 1
 }
 
-# Windows-only: find java.exe whose command line contains "nacos".
-# Uses PowerShell CIM query or wmic as fallback.
-_pm_find_nacos_pid_windows() {
-    local install_dir=$1
-    local pid=""
-    local ps_cmd
-    ps_cmd=$(_pm_powershell_cmd || true)
-    _pm_debug "find_nacos_pid_windows: ps_cmd='$ps_cmd'"
-
-    if [ -n "$ps_cmd" ]; then
-        local win_dir
-        win_dir=$(cd "$install_dir" 2>/dev/null && pwd -W 2>/dev/null) || win_dir=""
-        local search_term="${win_dir:-nacos}"
-        _pm_debug "find_nacos_pid_windows: win_dir='$win_dir' search_term='$search_term'"
-
-        pid=$("$ps_cmd" -NoProfile -Command "
-            \$p = Get-CimInstance Win32_Process -Filter \"Name='java.exe'\" -ErrorAction SilentlyContinue |
-                  Where-Object { \$_.CommandLine -and \$_.CommandLine -match [regex]::Escape('$search_term') } |
-                  Select-Object -First 1 -ExpandProperty ProcessId
-            if (\$p) { Write-Output \$p }
-        " 2>/dev/null | tr -d '\r' | tail -n 1)
-        _pm_debug "find_nacos_pid_windows: powershell_cim result='$pid'"
-        if [ -n "$pid" ] && [[ "$pid" =~ ^[0-9]+$ ]]; then
-            printf '%s\n' "$pid"
-            return 0
-        fi
-    fi
-
-    if command -v wmic >/dev/null 2>&1 || command -v wmic.exe >/dev/null 2>&1; then
-        local wmic_cmd
-        command -v wmic >/dev/null 2>&1 && wmic_cmd="wmic" || wmic_cmd="wmic.exe"
-        _pm_debug "find_nacos_pid_windows: trying wmic_cmd='$wmic_cmd'"
-        local wmic_raw
-        wmic_raw=$($wmic_cmd process where "Name='java.exe'" get ProcessId,CommandLine 2>/dev/null | tr -d '\r' | grep -i "nacos" | head -3)
-        _pm_debug "find_nacos_pid_windows: wmic nacos lines='$(echo "$wmic_raw" | head -2)'"
-        pid=$(echo "$wmic_raw" | awk '{print $NF}' | grep -E '^[0-9]+$' | head -1)
-        if [ -n "$pid" ] && [[ "$pid" =~ ^[0-9]+$ ]]; then
-            _pm_debug "find_nacos_pid_windows: wmic found pid='$pid'"
-            printf '%s\n' "$pid"
-            return 0
-        fi
-    else
-        _pm_debug "find_nacos_pid_windows: wmic not available"
-    fi
-
-    _pm_debug "find_nacos_pid_windows: no pid found"
-    return 1
-}
-
-# Return first available PowerShell executable name.
-_pm_powershell_cmd() {
-    local c
-    for c in powershell powershell.exe pwsh pwsh.exe; do
-        if command -v "$c" >/dev/null 2>&1; then
-            printf '%s\n' "$c"
-            return 0
-        fi
-    done
-    return 1
-}
-
-# Resolve PID by listening TCP port.
+# Resolve PID by listening TCP port (macOS / Linux).
 # Echo PID on success; return 0 when found.
 _pm_get_pid_by_listen_port() {
     local port=$1
     local pid=""
 
-    # Unix-like first
     if command -v lsof >/dev/null 2>&1; then
         pid=$(lsof -Pi :"$port" -sTCP:LISTEN -t 2>/dev/null | head -1)
         if [ -n "$pid" ]; then
             _pm_debug "get_pid_by_port($port): lsof found pid='$pid'"
             printf '%s\n' "$pid"
             return 0
-        fi
-    fi
-
-    # Windows PowerShell (Git Bash / MSYS / Cygwin)
-    if _pm_is_windows_env; then
-        local ps_cmd
-        ps_cmd=$(_pm_powershell_cmd || true)
-        if [ -n "$ps_cmd" ]; then
-            pid=$("$ps_cmd" -Command "\$c=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess; if (\$c) { Write-Output \$c }" 2>/dev/null | tr -d '\r' | tail -n 1)
-            _pm_debug "get_pid_by_port($port): powershell Get-NetTCPConnection result='$pid'"
-            if [ -n "$pid" ]; then
-                printf '%s\n' "$pid"
-                return 0
-            fi
-        else
-            _pm_debug "get_pid_by_port($port): powershell not available"
-        fi
-
-        # netstat fallback
-        if command -v netstat >/dev/null 2>&1; then
-            local netstat_lines
-            netstat_lines=$(netstat -ano 2>/dev/null | tr -d '\r' | grep -E "[:.]${port}[[:space:]]" | grep -Ei "LISTEN|LISTENING" | head -3)
-            _pm_debug "get_pid_by_port($port): netstat matches='$(echo "$netstat_lines" | head -2)'"
-            pid=$(echo "$netstat_lines" | awk '{print $NF}' | grep -E '^[0-9]+$' | head -1)
-            _pm_debug "get_pid_by_port($port): netstat parsed pid='$pid'"
-            if [ -n "$pid" ]; then
-                printf '%s\n' "$pid"
-                return 0
-            fi
-        else
-            _pm_debug "get_pid_by_port($port): netstat not available"
         fi
     fi
 
@@ -195,27 +92,6 @@ is_process_running() {
     if ps -p "$pid" >/dev/null 2>&1; then
         _pm_debug "is_running($pid): ps -p OK"
         return 0
-    fi
-    if _pm_is_windows_env; then
-        # tasklist is much faster than PowerShell (~50ms vs ~3s)
-        if command -v tasklist >/dev/null 2>&1; then
-            local tl_out
-            tl_out=$(tasklist //FI "PID eq $pid" //NH 2>/dev/null | tr -d '\r')
-            _pm_debug "is_running($pid): tasklist output='$(echo "$tl_out" | head -1)'"
-            if [ -n "$tl_out" ] && ! echo "$tl_out" | grep -qi "INFO:"; then
-                return 0
-            fi
-            return 1
-        fi
-        local ps_cmd
-        ps_cmd=$(_pm_powershell_cmd || true)
-        if [ -n "$ps_cmd" ]; then
-            "$ps_cmd" -NoProfile -Command "if (Get-Process -Id $pid -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >/dev/null 2>&1
-            local rc=$?
-            _pm_debug "is_running($pid): powershell Get-Process rc=$rc"
-            return $rc
-        fi
-        _pm_debug "is_running($pid): no checker available"
     fi
     return 1
 }
@@ -405,56 +281,16 @@ start_nacos_process() {
         export PATH="${JAVA_HOME}/bin:${PATH}"
     fi
 
-    # On Windows (Git Bash/MSYS), export NACOS_HOME as a Windows-format path.
-    # Nacos startup.sh uses NACOS_HOME (or BASE_DIR) to construct JVM arguments
-    # such as -Xlog:gc*:file=${BASE_DIR}/logs/nacos_gc.log. MSYS2 does NOT
-    # auto-convert paths embedded inside compound arguments like -Xlog, so
-    # the MSYS path (/c/Users/...) would be passed verbatim to the Windows
-    # JVM which cannot resolve it → "Could not create the Java Virtual Machine".
-    local _saved_nacos_home="${NACOS_HOME:-}"
-    if _pm_is_windows_env; then
-        local win_home
-        win_home=$(cd "$install_dir" 2>/dev/null && pwd -W 2>/dev/null) || win_home=""
-        if [ -n "$win_home" ]; then
-            export NACOS_HOME="$win_home"
-            _pm_debug "set NACOS_HOME='$win_home' (Windows path) for startup.sh"
-        fi
-        if [ -n "${JAVA_HOME:-}" ]; then
-            local win_java_home
-            win_java_home=$(cd "$JAVA_HOME" 2>/dev/null && pwd -W 2>/dev/null) || win_java_home=""
-            if [ -n "$win_java_home" ]; then
-                export JAVA_HOME="$win_java_home"
-                _pm_debug "set JAVA_HOME='$win_java_home' (Windows path) for startup.sh"
-            fi
-        fi
-    fi
-
     # Start Nacos
     local startup_log="$install_dir/logs/nacos-setup-startup.log"
     mkdir -p "$install_dir/logs" 2>/dev/null || true
 
     if [ "$use_derby" = true ] && [ "$mode" = "cluster" ]; then
-        if _pm_is_windows_env; then
-            # Git Bash may block when startup.sh keeps foreground attached.
-            ( bash "$install_dir/bin/startup.sh" -m "$mode" -p embedded >"$startup_log" 2>&1 ) &
-        else
-            bash "$install_dir/bin/startup.sh" -m "$mode" -p embedded >"$startup_log" 2>&1
-        fi
+        bash "$install_dir/bin/startup.sh" -m "$mode" -p embedded >"$startup_log" 2>&1
     else
-        if _pm_is_windows_env; then
-            ( bash "$install_dir/bin/startup.sh" -m "$mode" >"$startup_log" 2>&1 ) &
-        else
-            bash "$install_dir/bin/startup.sh" -m "$mode" >"$startup_log" 2>&1
-        fi
+        bash "$install_dir/bin/startup.sh" -m "$mode" >"$startup_log" 2>&1
     fi
 
-    # Restore original NACOS_HOME (if we changed it for Windows)
-    if [ -n "$_saved_nacos_home" ]; then
-        export NACOS_HOME="$_saved_nacos_home"
-    elif [ "${NACOS_HOME:-__unset__}" != "__unset__" ] && _pm_is_windows_env; then
-        unset NACOS_HOME
-    fi
-    
     # Clear JAVA_OPT after starting
     unset JAVA_OPT
     
@@ -463,8 +299,7 @@ start_nacos_process() {
     local retry_count=0
     local max_retries=40
 
-    _pm_debug "=== start_nacos_process: is_windows=$(_pm_is_windows_env && echo true || echo false) install_dir='$install_dir' main_port='$main_port'"
-    _pm_debug "=== OSTYPE='${OSTYPE:-}' uname='$(uname -s 2>/dev/null)'"
+    _pm_debug "=== start_nacos_process: install_dir='$install_dir' main_port='$main_port'"
     _pm_debug "=== startup_log='$startup_log'"
 
     while [ $retry_count -lt $max_retries ]; do
@@ -474,28 +309,14 @@ start_nacos_process() {
         # Method 1: Nacos PID file or startup log (fast, cross-platform)
         pid=$(_pm_read_nacos_pid "$install_dir" "$startup_log" || true)
 
-        if _pm_is_windows_env; then
-            # Method 2 (Windows): PowerShell/wmic process query (throttled to every 5s)
-            if [ -z "$pid" ] && [ $((retry_count % 5)) -eq 3 ]; then
-                _pm_debug "[${retry_count}s] trying _pm_find_nacos_pid_windows..."
-                pid=$(_pm_find_nacos_pid_windows "$install_dir" || true)
-            fi
-            # Method 3 (Windows): Port-based detection via netstat/PowerShell
-            if [ -z "$pid" ] && [ -n "$main_port" ]; then
-                pid=$(_pm_get_pid_by_listen_port "$main_port" || true)
-            fi
-        else
-            # Method 2 (Unix): ps-based detection
-            if [ -z "$pid" ]; then
-                pid=$(ps aux 2>/dev/null | grep "java" | grep "$install_dir" | grep -v grep | awk '{print $2}' | head -1)
-            fi
-            if [ -z "$pid" ]; then
-                pid=$(ps aux 2>/dev/null | grep -i "java" | grep -i "nacos" | grep -v grep | awk '{print $2}' | head -1)
-            fi
-            # Method 3 (Unix): Port-based detection
-            if [ -z "$pid" ] && [ -n "$main_port" ]; then
-                pid=$(_pm_get_pid_by_listen_port "$main_port" || true)
-            fi
+        if [ -z "$pid" ]; then
+            pid=$(ps aux 2>/dev/null | grep "java" | grep "$install_dir" | grep -v grep | awk '{print $2}' | head -1)
+        fi
+        if [ -z "$pid" ]; then
+            pid=$(ps aux 2>/dev/null | grep -i "java" | grep -i "nacos" | grep -v grep | awk '{print $2}' | head -1)
+        fi
+        if [ -z "$pid" ] && [ -n "$main_port" ]; then
+            pid=$(_pm_get_pid_by_listen_port "$main_port" || true)
         fi
 
         if [ -n "$pid" ]; then
@@ -539,11 +360,6 @@ detect_nacos_pid() {
         pid=$(_pm_get_pid_by_listen_port "$main_port" || true)
     fi
 
-    if [ -z "$pid" ] && _pm_is_windows_env; then
-        _pm_debug "detect_nacos_pid: trying windows process search..."
-        pid=$(_pm_find_nacos_pid_windows "$install_dir" || true)
-    fi
-
     _pm_debug "detect_nacos_pid: final pid='$pid'"
     if [ -n "$pid" ] && is_process_running "$pid"; then
         printf '%s\n' "$pid"
@@ -567,12 +383,7 @@ stop_nacos_gracefully() {
         return 0
     fi
     
-    # Try graceful shutdown
-    if _pm_is_windows_env && command -v taskkill >/dev/null 2>&1; then
-        taskkill //PID "$pid" >/dev/null 2>&1 || true
-    else
-        kill "$pid" 2>/dev/null || true
-    fi
+    kill "$pid" 2>/dev/null || true
     
     # Wait for graceful shutdown
     local wait_count=0
@@ -584,12 +395,7 @@ stop_nacos_gracefully() {
         wait_count=$((wait_count + 1))
     done
     
-    # Force kill if still running
-    if _pm_is_windows_env && command -v taskkill >/dev/null 2>&1; then
-        taskkill //F //T //PID "$pid" >/dev/null 2>&1 || true
-    else
-        kill -9 "$pid" 2>/dev/null || true
-    fi
+    kill -9 "$pid" 2>/dev/null || true
     sleep 1
     
     ! is_process_running "$pid"

@@ -48,6 +48,8 @@ cd nacos-setup
 sudo bash nacos-installer.sh
 ```
 
+在 **Windows** 上不要使用上述 Bash 安装器或 `nacos-setup.sh`：仓库里的 Bash 流程仅支持 Linux / macOS。请使用 `windows/nacos-installer.ps1`（或与线上一键安装相同的 PowerShell 命令），由 PowerShell 版 `nacos-setup.ps1` 管理实例。
+
 ### 验证安装
 
 ```bash

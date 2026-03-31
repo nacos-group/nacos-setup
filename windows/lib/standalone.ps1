@@ -23,6 +23,8 @@ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$scriptPath\java_manager.ps1"
 . "$scriptPath\process_manager.ps1"
 . "$scriptPath\data_import.ps1"
+$_ssLib = Join-Path $scriptPath "skill_scanner_install.ps1"
+if (Test-Path $_ssLib) { . $_ssLib }
 
 # ============================================================================
 # Global Variables for Standalone Mode
@@ -90,7 +92,7 @@ function Invoke-StandaloneMode {
     Write-Host ""
     
     # Check Java requirements
-    if (-not (Test-JavaRequirements $Global:Version $Global:AdvancedMode)) {
+    if (-not (Check-JavaRequirements $Global:Version $Global:AdvancedMode)) {
         Invoke-StandaloneCleanup 1
     }
     Write-Host ""
@@ -168,7 +170,20 @@ function Invoke-StandaloneMode {
     Write-Info "Post-config: importing default agentspec / skill data into $($Global:InstallDir)\data..."
     Invoke-PostNacosConfigDataImportHook $Global:InstallDir
     Write-Host ""
-    
+
+    # skill-scanner post-config hook
+    if (Get-Command Invoke-PostNacosConfigSkillScannerHook -ErrorAction SilentlyContinue) {
+        Invoke-PostNacosConfigSkillScannerHook $Global:Version
+        if (Get-Command Test-ShouldWriteSkillScannerPluginConfig -ErrorAction SilentlyContinue) {
+            if (Test-ShouldWriteSkillScannerPluginConfig $Global:Version) {
+                if (Get-Command Set-SkillScannerProperties -ErrorAction SilentlyContinue) {
+                    Set-SkillScannerProperties $configFile
+                }
+            }
+        }
+        Write-Host ""
+    }
+
     # Start Nacos if auto-start is enabled
     if ($Global:AutoStart) {
         Write-Info "Starting Nacos in standalone mode..."
@@ -187,7 +202,7 @@ function Invoke-StandaloneMode {
         Write-Host ""
         
         # Wait for readiness and initialize password
-        if (Wait-NacosReady $Global:ServerPort $Global:ConsolePort $Global:Version) {
+        if (Wait-ForNacosReady $Global:ServerPort $Global:ConsolePort $Global:Version 60) {
             $endTime = Get-Date
             $elapsed = [int]($endTime - $startTime).TotalSeconds
             Write-Info "Nacos is ready in ${elapsed}s!"

@@ -132,7 +132,7 @@ start_cluster_node() {
     
     # Wait for readiness
     if wait_for_nacos_ready "$main_port" "$console_port" "$nacos_version" 60; then
-        # Post-ready PID recovery for Windows
+        # Fallback PID recovery if detection raced with process startup
         if [ -z "$pid" ]; then
             pid=$(detect_nacos_pid "$node_dir" "$main_port" || true)
         fi
@@ -563,9 +563,6 @@ clean_existing_cluster() {
         if [ -z "$pid" ] && [ -n "$node_port" ]; then
             pid=$(_pm_get_pid_by_listen_port "$node_port" || true)
         fi
-        if [ -z "$pid" ] && _pm_is_windows_env; then
-            pid=$(_pm_find_nacos_pid_windows "$node_dir" || true)
-        fi
 
         if [ -n "$pid" ] && is_process_running "$pid"; then
             print_detail "Stopping $(basename "$node_dir") (PID: $pid)"
@@ -856,9 +853,6 @@ leave_cluster() {
     pid=$(ps aux 2>/dev/null | grep "java" | grep "$target_node_dir" | grep -v grep | awk '{print $2}' | head -1)
     if [ -z "$pid" ] && [ -n "$node_port" ]; then
         pid=$(_pm_get_pid_by_listen_port "$node_port" || true)
-    fi
-    if [ -z "$pid" ] && _pm_is_windows_env; then
-        pid=$(_pm_find_nacos_pid_windows "$target_node_dir" || true)
     fi
 
     if [ -n "$pid" ] && is_process_running "$pid"; then

@@ -17,129 +17,42 @@ _SKILL_SCANNER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_SCANNER_VENV_PATH_RELATIVE="ai-infra/.venv"
 SKILL_SCANNER_INSTALLED="false"
 
-# Git Bash / MSYS / Cygwin: venv uses Scripts/*.exe, not bin/python.
-_skill_scanner_is_windows_env() {
-    case "${OSTYPE:-}" in
-        cygwin | msys) return 0 ;;
-    esac
-    case "$(uname -s 2>/dev/null)" in
-        CYGWIN* | MINGW* | MSYS*) return 0 ;;
-        *) ;;
-    esac
-    # WSL may inherit WINDIR/OS from Windows; still use Linux venv layout (bin/), not Scripts/.
-    if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -n "${WSL_INTEROP:-}" ]; then
-        return 1
-    fi
-    # Git Bash edge cases: missing MSYS in OSTYPE/uname but native Windows env is visible.
-    case "${OS:-}" in
-        Windows_NT) return 0 ;;
-    esac
-    [ -n "${WINDIR:-}" ] || [ -n "${SYSTEMROOT:-}" ] && return 0
-    return 1
-}
-
-# Directory containing venv console_scripts / python (bin vs Scripts).
 _skill_scanner_venv_scripts_dir() {
-    local venv_dir="$1"
-    if _skill_scanner_is_windows_env; then
-        printf '%s\n' "${venv_dir}/Scripts"
-    else
-        printf '%s\n' "${venv_dir}/bin"
-    fi
+    printf '%s/bin\n' "$1"
 }
 
-# Path to the venv Python interpreter for uv/pip --python.
 _skill_scanner_venv_python_path() {
-    local venv_dir="$1"
-    if _skill_scanner_is_windows_env; then
-        printf '%s\n' "${venv_dir}/Scripts/python.exe"
-    else
-        printf '%s\n' "${venv_dir}/bin/python"
-    fi
+    printf '%s/bin/python\n' "$1"
 }
 
-# Path to skill-scanner CLI inside the venv (if installed).
 _skill_scanner_venv_skill_scanner_path() {
-    local venv_dir="$1"
-    if _skill_scanner_is_windows_env; then
-        printf '%s\n' "${venv_dir}/Scripts/skill-scanner.exe"
-    else
-        printf '%s\n' "${venv_dir}/bin/skill-scanner"
-    fi
+    printf '%s/bin/skill-scanner\n' "$1"
 }
 
-# True if venv python exists (executable or regular file on Windows .exe).
 _skill_scanner_venv_python_exists() {
     local p="$1"
     [ -z "$p" ] && return 1
-    [ -x "$p" ] && return 0
-    _skill_scanner_is_windows_env && [ -f "$p" ] && return 0
-    return 1
+    [ -x "$p" ]
 }
 
-# Cross-platform temporary directory (supports Windows/Git Bash/MSYS)
 _skill_scanner_get_temp_dir() {
-    # Prefer native Windows temp if available (Git Bash/MSYS)
-    if [ -n "${TEMP:-}" ] && [ -d "$TEMP" ]; then
-        printf '%s\n' "$TEMP"
-        return 0
-    fi
-    if [ -n "${TMP:-}" ] && [ -d "$TMP" ]; then
-        printf '%s\n' "$TMP"
-        return 0
-    fi
-    # Fallback to TMPDIR or /tmp
     if [ -n "${TMPDIR:-}" ] && [ -d "$TMPDIR" ]; then
         printf '%s\n' "$TMPDIR"
         return 0
     fi
-    # Ensure /tmp exists (create if needed on Windows/Git Bash)
     if [ -d "/tmp" ]; then
         printf '%s\n' "/tmp"
         return 0
     fi
-    # On Windows/Git Bash, /tmp may not exist - use HOME as fallback
     if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
         printf '%s\n' "$HOME"
         return 0
     fi
-    # Last resort: use current directory
     printf '%s\n' "."
 }
 
-# Nacos on Windows uses JVM + ProcessBuilder; prefer C:/... (cygpath -m) for properties and exec.
 _skill_scanner_path_for_nacos_server() {
-    local p="$1"
-    local win_dir base w
-    [ -z "$p" ] && return 0
-    if ! _skill_scanner_is_windows_env; then
-        printf '%s\n' "$p"
-        return 0
-    fi
-    if command -v cygpath >/dev/null 2>&1; then
-        w=$(cygpath -m "$p" 2>/dev/null) || w=""
-        if [ -n "$w" ]; then
-            printf '%s\n' "$w"
-            return 0
-        fi
-        w=$(cygpath -aw "$p" 2>/dev/null) || w=""
-        if [ -n "$w" ]; then
-            printf '%s\n' "$w"
-            return 0
-        fi
-    fi
-    case "$p" in
-        /*)
-            base=$(basename "$p")
-            win_dir=$(cd "$(dirname "$p")" 2>/dev/null && pwd -W 2>/dev/null) || win_dir=""
-            if [ -n "$win_dir" ] && [ -n "$base" ]; then
-                printf '%s\n' "${win_dir}/${base}"
-                return 0
-            fi
-            ;;
-    esac
-    printf '%s\n' "$p"
-    return 0
+    printf '%s\n' "$1"
 }
 
 # After maybe_install: write plugin config if stack was installed OR a scanner binary is already discoverable.
@@ -225,7 +138,7 @@ _get_skill_scanner_command_path() {
     venv_dir=$(_skill_scanner_venv_dir_for_user 2>/dev/null || true)
     if [ -n "$venv_dir" ]; then
         scanner=$(_skill_scanner_venv_skill_scanner_path "$venv_dir")
-        if [ -x "$scanner" ] || { _skill_scanner_is_windows_env && [ -f "$scanner" ]; }; then
+        if [ -x "$scanner" ]; then
             printf '%s\n' "$scanner"
             return 0
         fi
@@ -403,29 +316,7 @@ _skill_scanner_bootstrap_uv() {
 
 _find_python_310_plus() {
     local out
-    # On Windows/Git Bash, also try common Python installation locations
-    local extra_paths=""
-    local search_path="$PATH"
-    if _skill_scanner_is_windows_env; then
-        # Add common Windows Python locations to PATH for the search
-        local win_paths=""
-        if [ -n "${LOCALAPPDATA:-}" ]; then
-            # Windows Store Python, uv-installed Python, etc.
-            for d in "$LOCALAPPDATA"/Microsoft/WindowsApps \
-                     "$LOCALAPPDATA"/uv/python/*/install \
-                     "$LOCALAPPDATA"/Programs/Python/Python3*; do
-                if [ -d "$d" ]; then
-                    win_paths="${win_paths}${win_paths:+:}$d"
-                fi
-            done
-        fi
-        if [ -n "$win_paths" ]; then
-            search_path="$win_paths:$PATH"
-        fi
-    fi
-
-    # Pass current PATH to subshell to ensure Python is found
-    if ! out=$(_skill_scanner_runas_target_user env "PATH=$search_path" bash -c '
+    if ! out=$(_skill_scanner_runas_target_user env "PATH=$PATH" bash -c '
         for c in python3.13 python3.12 python3.11 python3.10 python3; do
             if command -v "$c" >/dev/null 2>&1 && "$c" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
                 command -v "$c"
@@ -456,7 +347,7 @@ _ensure_python_310_plus_with_uv() {
     print_info "Installing Python 3.10 with uv (this may take a moment)..." >&2
     local py_install_ok=0
     # Do not use `uv -q python install`: on some uv versions -q can return early.
-    # Simple UI: UV_NO_PROGRESS + write output to a temp file — not /dev/null (Git Bash/MSYS often fails with no TTY).
+    # Simple UI: UV_NO_PROGRESS + write output to a temp file when not verbose.
     local quiet_py_install=0
     _skill_scanner_uv_use_quiet_output && quiet_py_install=1
     if [ "$quiet_py_install" -eq 1 ]; then
@@ -495,7 +386,6 @@ _ensure_python_310_plus_with_uv() {
     fi
 
     if [ -n "$py_exe" ]; then
-        # Verify and potentially get a better path (especially on Windows)
         local verified_py
         verified_py=$(_skill_scanner_verify_python310 "$py_exe")
         if [ -n "$verified_py" ]; then
@@ -514,50 +404,10 @@ _skill_scanner_refresh_path_for_uv_python() {
     home=$(_skill_scanner_runas_target_user env "PATH=$PATH" bash -c 'printf %s "$HOME"')
     _skill_scanner_trace "DEBUG _skill_scanner_refresh_path_for_uv_python: HOME=$home"
 
-    # uv installs Python to ~/.local/share/uv/python on Unix
-    # and %LOCALAPPDATA%\uv\python on Windows
-    if _skill_scanner_is_windows_env; then
-        _skill_scanner_trace "DEBUG: Windows environment detected"
-
-        # On Windows/Git Bash, also check Windows native paths
-        if [ -n "${LOCALAPPDATA:-}" ]; then
-            _skill_scanner_trace "DEBUG: LOCALAPPDATA=$LOCALAPPDATA"
-            if [ -d "$LOCALAPPDATA/uv/python" ]; then
-                _skill_scanner_trace "DEBUG: Adding $LOCALAPPDATA/uv/python to PATH"
-                _skill_scanner_prepend_path_dir "$LOCALAPPDATA/uv/python"
-            fi
-
-            # Also check for specific Python version directories
-            for py_dir in "$LOCALAPPDATA"/uv/python/cpython-3.10.*/install/bin \
-                          "$LOCALAPPDATA"/uv/python/cpython-3.10.*/install \
-                          "$LOCALAPPDATA"/uv/python/python3.10/bin; do
-                if [ -d "$py_dir" ]; then
-                    _skill_scanner_trace "DEBUG: Adding $py_dir to PATH"
-                    _skill_scanner_prepend_path_dir "$py_dir"
-                fi
-            done
-        fi
-
-        # Try to convert Windows path to Git Bash format
-        local uv_python_dir="$home/.local/share/uv/python"
-        if [ -d "$uv_python_dir" ]; then
-            _skill_scanner_trace "DEBUG: Adding $uv_python_dir to PATH"
-            _skill_scanner_prepend_path_dir "$uv_python_dir"
-
-            # Look for bin directories within
-            for bin_dir in "$uv_python_dir"/*/bin "$uv_python_dir"/cpython-3.10.*/install/bin; do
-                if [ -d "$bin_dir" ]; then
-                    _skill_scanner_trace "DEBUG: Adding $bin_dir to PATH"
-                    _skill_scanner_prepend_path_dir "$bin_dir"
-                fi
-            done
-        fi
-    else
-        local uv_python_dir="$home/.local/share/uv/python"
-        if [ -d "$uv_python_dir" ]; then
-            _skill_scanner_trace "DEBUG: Adding $uv_python_dir to PATH"
-            _skill_scanner_prepend_path_dir "$uv_python_dir"
-        fi
+    local uv_python_dir="$home/.local/share/uv/python"
+    if [ -d "$uv_python_dir" ]; then
+        _skill_scanner_trace "DEBUG: Adding $uv_python_dir to PATH"
+        _skill_scanner_prepend_path_dir "$uv_python_dir"
     fi
 
     # Also ensure uv itself is still on PATH
@@ -566,81 +416,22 @@ _skill_scanner_refresh_path_for_uv_python() {
     _skill_scanner_trace "DEBUG: PATH after refresh: $PATH"
 }
 
-# Verify Python 3.10+ with cross-platform support.
-# On success, prints the verified Python path to stdout and returns 0.
-# On failure, prints nothing and returns 1.
+# Verify Python 3.10+. On success prints path to stdout.
 _skill_scanner_verify_python310() {
     local py_exe="$1"
     _skill_scanner_trace "DEBUG _skill_scanner_verify_python310: input py_exe='$py_exe'"
     [ -z "$py_exe" ] && { _skill_scanner_trace "DEBUG: empty input, returning 1"; return 1; }
 
-    # Check if the file exists and is executable
-    if [ -f "$py_exe" ]; then
-        _skill_scanner_trace "DEBUG: file exists at '$py_exe'"
-        if [ -x "$py_exe" ]; then
-            _skill_scanner_trace "DEBUG: file is executable"
-        else
-            _skill_scanner_trace "DEBUG: file is NOT executable (may still work on Windows)"
-        fi
-    else
-        _skill_scanner_trace "DEBUG: file does NOT exist at '$py_exe'"
-    fi
-
-    # On Windows/Git Bash, the path might be in Windows format (C:\...)
-    # Try to run it directly first
-    _skill_scanner_trace "DEBUG: trying direct execution: '$py_exe -c import sys...'"
     if _skill_scanner_runas_target_user "$py_exe" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
-        _skill_scanner_trace "DEBUG: direct execution succeeded"
         printf '%s\n' "$py_exe"
         return 0
     fi
-    _skill_scanner_trace "DEBUG: direct execution failed"
 
-    # On Windows, try converting the path format
-    if _skill_scanner_is_windows_env; then
-        _skill_scanner_trace "DEBUG: Windows env detected, trying path conversions"
-
-        # Try cygpath conversion if available
-        if command -v cygpath >/dev/null 2>&1; then
-            local cyg_path
-            cyg_path=$(cygpath -u "$py_exe" 2>/dev/null) || cyg_path=""
-            if [ -n "$cyg_path" ] && [ -f "$cyg_path" ]; then
-                _skill_scanner_trace "DEBUG: trying cygpath conversion: '$cyg_path'"
-                if _skill_scanner_runas_target_user "$cyg_path" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
-                    printf '%s\n' "$cyg_path"
-                    return 0
-                fi
-            fi
-        fi
-
-        # Try finding via PATH instead
-        local py_from_path
-        _skill_scanner_trace "DEBUG: searching for python in PATH..."
-        # Pass current PATH to subshell
-        py_from_path=$(_skill_scanner_runas_target_user env "PATH=$PATH" bash -c 'command -v python3.10 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || true')
-        _skill_scanner_trace "DEBUG: found in PATH: '$py_from_path'"
-        if [ -n "$py_from_path" ]; then
-            if _skill_scanner_runas_target_user "$py_from_path" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
-                _skill_scanner_trace "DEBUG: execution via PATH succeeded"
-                printf '%s\n' "$py_from_path"
-                return 0
-            fi
-            _skill_scanner_trace "DEBUG: execution via PATH failed"
-        fi
-
-        # Try common Windows Python locations
-        local home
-        home=$(_skill_scanner_runas_target_user env "PATH=$PATH" bash -c 'printf %s "$HOME"')
-        local common_locs="$home/.local/share/uv/python/python3.10/bin/python3 $home/.local/share/uv/python/cpython-3.10*/install/python.exe"
-        for loc in $common_locs; do
-            if [ -f "$loc" ]; then
-                _skill_scanner_trace "DEBUG: trying common location: '$loc'"
-                if _skill_scanner_runas_target_user "$loc" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
-                    printf '%s\n' "$loc"
-                    return 0
-                fi
-            fi
-        done
+    local py_from_path
+    py_from_path=$(_skill_scanner_runas_target_user env "PATH=$PATH" bash -c 'command -v python3.10 2>/dev/null || command -v python3 2>/dev/null || command -v python 2>/dev/null || true')
+    if [ -n "$py_from_path" ] && _skill_scanner_runas_target_user "$py_from_path" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
+        printf '%s\n' "$py_from_path"
+        return 0
     fi
 
     _skill_scanner_trace "DEBUG: all verification attempts failed"
@@ -769,7 +560,7 @@ _skill_scanner_installed_in_venv() {
     venv_dir=$(dirname "$(dirname "$venv_python")")
     scanner=$(_skill_scanner_venv_skill_scanner_path "$venv_dir")
     # uv-managed venvs often have no pip module; the CLI is the reliable signal.
-    if [ -x "$scanner" ] || { _skill_scanner_is_windows_env && [ -f "$scanner" ]; }; then
+    if [ -x "$scanner" ]; then
         return 0
     fi
     _skill_scanner_runas_target_user "$venv_python" -m pip show "$SKILL_SCANNER_PYPI_PACKAGE" >/dev/null 2>&1

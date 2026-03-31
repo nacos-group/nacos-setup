@@ -9,6 +9,38 @@ function Get-LogTimestamp {
     return Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 }
 
+function Get-NacosSetupLogDirectory {
+    $profile = if ($env:REAL_USER_PROFILE) { $env:REAL_USER_PROFILE }
+        elseif ($env:USERPROFILE) { $env:USERPROFILE }
+        else { "." }
+    Join-Path $profile ".nacos\logs"
+}
+
+function Get-NacosSetupLogFile {
+    Join-Path (Get-NacosSetupLogDirectory) "nacos-setup.log"
+}
+
+# Append one line to ~/.nacos/logs/nacos-setup.log (UTF-8). Safe to call when console closes.
+function Write-NacosSetupLog {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+        [string]$Level = "INFO"
+    )
+    try {
+        $dir = Get-NacosSetupLogDirectory
+        if (-not (Test-Path -LiteralPath $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+        $logFile = Get-NacosSetupLogFile
+        $ts = Get-LogTimestamp
+        foreach ($segment in ($Message -split "`r?`n")) {
+            if ([string]::IsNullOrWhiteSpace($segment)) { continue }
+            Add-Content -LiteralPath $logFile -Value "$ts [$Level] $segment" -Encoding UTF8
+        }
+    } catch {}
+}
+
 function Write-Info($msg) { 
     Write-Host "[INFO] $msg" -ForegroundColor $Global:ColorInfo 
 }

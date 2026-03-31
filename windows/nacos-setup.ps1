@@ -118,6 +118,10 @@ foreach ($libFile in $optionalLibFiles) {
     if (Test-Path $libFilePath) { . $libFilePath }
 }
 
+if (Get-Command Write-NacosSetupLog -ErrorAction SilentlyContinue) {
+    Write-NacosSetupLog "nacos-setup started (setupVersion=$NacosSetupVersion, pwsh=$($PSVersionTable.PSVersion), pid=$PID)"
+}
+
 # =============================
 # Main
 # =============================
@@ -741,6 +745,18 @@ try {
         "cluster" { Run-Cluster }
         default { Write-ErrorMsg "Unknown mode: $Global:Mode"; exit 1 }
     }
+} catch {
+    try {
+        if (Get-Command Write-NacosSetupLog -ErrorAction SilentlyContinue) {
+            Write-NacosSetupLog "Unhandled: $($_.Exception.Message)" "FATAL"
+            if ($_.ScriptStackTrace) { Write-NacosSetupLog "$($_.ScriptStackTrace)" "FATAL" }
+        }
+    } catch {}
+    Write-ErrorMsg "Unexpected error: $($_.Exception.Message)"
+    if (Get-Command Get-NacosSetupLogFile -ErrorAction SilentlyContinue) {
+        Write-Host "[INFO] If the window closed, see log: $(Get-NacosSetupLogFile)" -ForegroundColor Cyan
+    }
+    exit 1
 } finally {
     try { Invoke-NacosSetupCleanup } catch {}
 }

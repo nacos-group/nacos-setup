@@ -74,9 +74,10 @@ function Add-PathDirIfMissing($dir) {
 }
 
 function Refresh-PathForUv {
-    $home = Get-SkillScannerUserHome
-    Add-PathDirIfMissing (Join-Path $home ".local\bin")
-    Add-PathDirIfMissing (Join-Path $home ".cargo\bin")
+    # Do not use $home: it is an alias for read-only automatic variable $HOME in PowerShell.
+    $skillScannerUserDir = Get-SkillScannerUserHome
+    Add-PathDirIfMissing (Join-Path $skillScannerUserDir ".local\bin")
+    Add-PathDirIfMissing (Join-Path $skillScannerUserDir ".cargo\bin")
     # uv's own bin directory on Windows (where uv.exe is installed by the PS installer)
     Add-PathDirIfMissing (Join-Path $env:APPDATA "uv\bin")
     Add-PathDirIfMissing (Join-Path $env:LOCALAPPDATA "uv\bin")
@@ -147,8 +148,8 @@ function Ensure-Python310WithUv {
     }
 
     # Refresh PATH to find newly installed Python managed by uv
-    $home = Get-SkillScannerUserHome
-    Add-PathDirIfMissing (Join-Path $home ".local\share\uv\python")
+    $skillScannerUserDir = Get-SkillScannerUserHome
+    Add-PathDirIfMissing (Join-Path $skillScannerUserDir ".local\share\uv\python")
 
     try {
         $pyPath = (& uv python find 3.10 2>$null).Trim()

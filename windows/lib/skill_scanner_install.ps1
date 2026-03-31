@@ -65,10 +65,89 @@ function Find-SkillScannerOnPath {
 
 function Normalize-UvCommandOutput($output) {
     if ($null -eq $output) { return '' }
-    if ($output -is [System.Array]) {
-        return ([string]($output | Select-Object -First 1)).Trim()
+    $lines = foreach ($x in @($output)) {
+        if ($x -is [System.Management.Automation.ErrorRecord]) {
+            $m = $x.Exception.Message
+            if ($m) { $m.Trim() }
+        } elseif ($null -ne $x) {
+            ([string]$x).Trim()
+        }
     }
-    return ([string]$output).Trim()
+    $lines = @($lines | Where-Object { $_ })
+    if ($lines.Count -eq 0) { return '' }
+    foreach ($line in $lines) {
+        if ($line -match '^[A-Za-z]:\\' -or $line -match '^\\\\' -or $line -match '\\[^\\]+\.(exe|EXE)$') {
+            return $line
+        }
+    }
+    return [string]$lines[0]
+}
+
+# Run uv without stderr/progress tripping nacos-setup.ps1's $ErrorActionPreference = Stop.
+function Invoke-NacosUv {
+    param(
+        [Parameter(Mandatory)][string[]]$ArgumentList,
+        [switch]$SuppressStreams
+    )
+    $prevEap = $ErrorActionPreference
+    $hadNativePref = $false
+    $prevNative = $false
+    if ($PSVersionTable.PSVersion.Major -ge 7) {
+        $hadNativePref = Test-Path variable:global:PSNativeCommandUseErrorActionPreference
+        if ($hadNativePref) { $prevNative = $Global:PSNativeCommandUseErrorActionPreference }
+        $Global:PSNativeCommandUseErrorActionPreference = $false
+    }
+    try {
+        $ErrorActionPreference = 'Continue'
+        if (-not ((Get-Command Test-NacosSetupVerbose -ErrorAction SilentlyContinue) -and (Test-NacosSetupVerbose))) {
+            $env:UV_NO_PROGRESS = '1'
+        }
+        if ($SuppressStreams) {
+            & uv @ArgumentList 1>$null 2>$null
+        } else {
+            & uv @ArgumentList
+        }
+        $code = $LASTEXITCODE
+        if ($null -eq $code) { return -1 }
+        return [int]$code
+    } finally {
+        $ErrorActionPreference = $prevEap
+        Remove-Item Env:UV_NO_PROGRESS -ErrorAction SilentlyContinue
+        if ($PSVersionTable.PSVersion.Major -ge 7) {
+            if ($hadNativePref) {
+                $Global:PSNativeCommandUseErrorActionPreference = $prevNative
+            } else {
+                Remove-Item variable:global:PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+function Get-NacosUvTextLines {
+    param([Parameter(Mandatory)][string[]]$ArgumentList)
+    $prevEap = $ErrorActionPreference
+    $hadNativePref = $false
+    $prevNative = $false
+    if ($PSVersionTable.PSVersion.Major -ge 7) {
+        $hadNativePref = Test-Path variable:global:PSNativeCommandUseErrorActionPreference
+        if ($hadNativePref) { $prevNative = $Global:PSNativeCommandUseErrorActionPreference }
+        $Global:PSNativeCommandUseErrorActionPreference = $false
+    }
+    try {
+        $ErrorActionPreference = 'Continue'
+        $env:UV_NO_PROGRESS = '1'
+        & uv @ArgumentList 2>&1
+    } finally {
+        $ErrorActionPreference = $prevEap
+        Remove-Item Env:UV_NO_PROGRESS -ErrorAction SilentlyContinue
+        if ($PSVersionTable.PSVersion.Major -ge 7) {
+            if ($hadNativePref) {
+                $Global:PSNativeCommandUseErrorActionPreference = $prevNative
+            } else {
+                Remove-Item variable:global:PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+            }
+        }
+    }
 }
 
 function Test-UvOnPath {
@@ -168,12 +247,9 @@ function Ensure-Python310WithUv {
     }
 
     Write-Info "Installing Python 3.10 with uv (this may take a moment)..."
-    try {
-        $env:UV_NO_PROGRESS = "1"
-        & uv python install 3.10 2>&1 | Out-Null
-        Remove-Item Env:UV_NO_PROGRESS -ErrorAction SilentlyContinue
-    } catch {
-        Write-Warn "uv python install 3.10 failed: $($_.Exception.Message)"
+    $pyExit = Invoke-NacosUv -ArgumentList @('python', 'install', '3.10') -SuppressStreams:(-not (Test-NacosSetupVerbose))
+    if ($pyExit -ne 0) {
+        Write-Warn "uv python install 3.10 failed (exit code $pyExit)."
         return $null
     }
 
@@ -181,13 +257,12 @@ function Ensure-Python310WithUv {
     $skillScannerUserDir = Get-SkillScannerUserHome
     Add-PathDirIfMissing (Join-Path $skillScannerUserDir ".local\share\uv\python")
 
-    try {
-        $pyPath = Normalize-UvCommandOutput (& uv python find 3.10 2>$null)
-        if ($pyPath -and (Test-Path -LiteralPath $pyPath)) {
-            Write-Info "Python 3.10 ready: $pyPath"
-            return $pyPath
-        }
-    } catch {}
+    $pyLines = Get-NacosUvTextLines -ArgumentList @('python', 'find', '3.10')
+    $pyPath = Normalize-UvCommandOutput $pyLines
+    if ($pyPath -and (Test-Path -LiteralPath $pyPath)) {
+        Write-Info "Python 3.10 ready: $pyPath"
+        return $pyPath
+    }
 
     Write-Warn "Could not locate uv-managed Python 3.10 after installation."
     return $null
@@ -202,10 +277,8 @@ function New-SkillScannerVenv($pyExe, $venvDir) {
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
 
     $pyArg = $pyExe
-    try {
-        $found310 = Normalize-UvCommandOutput (& uv python find 3.10 2>$null)
-        if ($found310 -and (Test-Path -LiteralPath $found310)) { $pyArg = "3.10" }
-    } catch {}
+    $found310 = Normalize-UvCommandOutput (Get-NacosUvTextLines -ArgumentList @('python', 'find', '3.10'))
+    if ($found310 -and (Test-Path -LiteralPath $found310)) { $pyArg = "3.10" }
 
     Write-SkillScannerTrace "Creating venv at $venvDir with python=$pyArg"
 
@@ -221,13 +294,11 @@ function New-SkillScannerVenv($pyExe, $venvDir) {
             if ($attempt.env) {
                 foreach ($k in $attempt.env.Keys) { Set-Item "Env:$k" $attempt.env[$k] }
             }
-            $env:UV_NO_PROGRESS = "1"
-            & uv @($attempt.args) 2>&1 | Out-Null
-            Remove-Item Env:UV_NO_PROGRESS -ErrorAction SilentlyContinue
+            $venvExit = Invoke-NacosUv -ArgumentList $attempt.args -SuppressStreams:(-not (Test-NacosSetupVerbose))
             if ($attempt.env) {
                 foreach ($k in $attempt.env.Keys) { Remove-Item "Env:$k" -ErrorAction SilentlyContinue }
             }
-            if (Test-Path (Get-SkillScannerVenvPython $venvDir)) { return $true }
+            if ($venvExit -eq 0 -and (Test-Path (Get-SkillScannerVenvPython $venvDir))) { return $true }
         } catch {}
     }
     return $false
@@ -235,10 +306,8 @@ function New-SkillScannerVenv($pyExe, $venvDir) {
 
 function Install-SkillScannerInVenv($venvPython) {
     try {
-        $env:UV_NO_PROGRESS = "1"
-        & uv pip install --python $venvPython $script:SkillScannerPypiPackage -qq 2>&1 | Out-Null
-        Remove-Item Env:UV_NO_PROGRESS -ErrorAction SilentlyContinue
-        return ($LASTEXITCODE -eq 0)
+        $pipExit = Invoke-NacosUv -ArgumentList @('pip', 'install', '--python', $venvPython, $script:SkillScannerPypiPackage, '-qq') -SuppressStreams:(-not (Test-NacosSetupVerbose))
+        return ($pipExit -eq 0)
     } catch { return $false }
 }
 

@@ -132,14 +132,17 @@ function Invoke-StandaloneMode {
 
     if (Test-Path $Global:InstallDir) {
         Write-Warn "Removing existing installation at $($Global:InstallDir)"
+        # First pass: always stop known Nacos/Java/cmd trees (closing the window does not run try/finally; processes often survive).
+        Stop-ProcessesUsingInstallDir $Global:InstallDir
+
         $lockingProcs = Get-BlockingProcesses $Global:InstallDir
         if ($lockingProcs) {
-            Write-Warn "Found processes running from or using this directory:"
+            Write-Warn "Found processes still using this directory:"
             foreach ($p in $lockingProcs) { Write-Warn "  PID: $($p.ProcessId) - $($p.Name)" }
             if ($Global:AllowKill) {
                 Write-Info "Kill mode is enabled. Stopping processes..."
                 foreach ($p in $lockingProcs) {
-                    try { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+                    try { cmd /c "taskkill /F /PID $($p.ProcessId) /T >nul 2>&1" } catch {}
                 }
                 Start-Sleep -Seconds 2
             } else {
@@ -147,11 +150,9 @@ function Invoke-StandaloneMode {
                 exit 1
             }
         }
-        try {
-            Remove-Item -Recurse -Force $Global:InstallDir -ErrorAction Stop
-        } catch {
+        if (-not (Remove-DirectoryRobust $Global:InstallDir)) {
             Write-ErrorMsg "Failed to remove directory. One or more files may still be in use."
-            Write-ErrorMsg $_.Exception.Message
+            Write-ErrorMsg "Close any program using this folder, or run with --kill, then retry."
             exit 1
         }
     }

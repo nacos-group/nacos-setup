@@ -90,6 +90,57 @@ function Ensure-Directory($path) {
     if (-not (Test-Path $path)) { New-Item -ItemType Directory -Path $path | Out-Null }
 }
 
+# Remove a directory tree: retries (handles transient locks), \\?\ long-path prefix, then robocopy /MIR
+# to empty deeply nested trees that exceed MAX_PATH or confuse Remove-Item (e.g. Office-schema paths in JAR tooling).
+function Remove-DirectoryRobust {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+
+    $fullPath = (Get-Item -LiteralPath $Path).FullName
+
+    for ($t = 0; $t -lt 5; $t++) {
+        try {
+            Remove-Item -LiteralPath $fullPath -Recurse -Force -ErrorAction Stop
+            return $true
+        } catch {
+            Start-Sleep -Seconds 1
+        }
+    }
+
+    if ($fullPath -match '^[A-Za-z]:\\') {
+        $longPref = "\\?\$fullPath"
+        if (Test-Path -LiteralPath $longPref) {
+            for ($t = 0; $t -lt 3; $t++) {
+                try {
+                    Remove-Item -LiteralPath $longPref -Recurse -Force -ErrorAction Stop
+                    return $true
+                } catch {
+                    Start-Sleep -Seconds 1
+                }
+            }
+        }
+    }
+
+    $empty = Join-Path $env:TEMP ("nacos-empty-" + [Guid]::NewGuid().ToString())
+    try {
+        New-Item -ItemType Directory -Path $empty -Force | Out-Null
+        $robocopy = Get-Command robocopy.exe -ErrorAction SilentlyContinue
+        if ($robocopy) {
+            & robocopy.exe $empty $fullPath /MIR /R:0 /W:0 /NFL /NDL /NJH /NJS /NP 2>&1 | Out-Null
+        }
+        Remove-Item -LiteralPath $empty -Recurse -Force -ErrorAction SilentlyContinue
+        if (-not (Test-Path -LiteralPath $fullPath)) { return $true }
+        try {
+            Remove-Item -LiteralPath $fullPath -Recurse -Force -ErrorAction Stop
+            return $true
+        } catch {}
+        cmd /c "rd /s /q `"$fullPath`"" 2>&1 | Out-Null
+        if (-not (Test-Path -LiteralPath $fullPath)) { return $true }
+    } catch {}
+
+    return $false
+}
+
 function Version-Ge($v1, $v2) {
     if ([string]::IsNullOrWhiteSpace($v1)) { $v1 = "0.0.0" }
     if ([string]::IsNullOrWhiteSpace($v2)) { $v2 = "0.0.0" }

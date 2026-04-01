@@ -76,7 +76,9 @@ function Install-Nacos($sourceDir, $targetDir) {
     Write-Detail "Installing Nacos to: $targetDir"
     if (Test-Path $targetDir) { 
         Write-Detail "Removing old installation: $targetDir"
-        Remove-Item -Recurse -Force $targetDir 
+        if (-not (Remove-DirectoryRobust $targetDir)) {
+            throw "Could not remove existing target directory: $targetDir"
+        }
     }
     Ensure-Directory (Split-Path $targetDir -Parent)
     Move-Item -Path $sourceDir -Destination $targetDir

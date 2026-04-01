@@ -70,3 +70,62 @@ find_local_schema() {
 
     return 1
 }
+
+# ============================================================================
+# Remote Schema Download
+# ============================================================================
+
+# Returns the cache file path for a given version and type.
+_schema_cache_path() {
+    local version="$1"
+    local db_type="$2"
+    echo "${DB_SCHEMA_CACHE_DIR}/${version}-${db_type}-schema.sql"
+}
+
+# Build the GitHub raw URL for a schema file.
+# Tries new plugin path first, falls back to old distribution/conf path.
+_schema_github_urls() {
+    local version="$1"
+    local db_type="$2"
+    # New path (Nacos >3.1.1, after plugin refactor)
+    echo "https://raw.githubusercontent.com/alibaba/nacos/${version}/plugin-default-impl/nacos-default-datasource-plugin/nacos-datasource-plugin-${db_type}/src/main/resources/META-INF/${db_type}-schema.sql"
+    # Old path (Nacos <=3.1.1)
+    echo "https://raw.githubusercontent.com/alibaba/nacos/${version}/distribution/conf/${db_type}-schema.sql"
+}
+
+# Download schema from GitHub with new-path-first fallback.
+# Caches the result. Outputs the local file path on success.
+download_schema() {
+    local version="$1"
+    local db_type="$2"
+
+    # Check cache first
+    local cache_file
+    cache_file=$(_schema_cache_path "$version" "$db_type")
+    if [ -f "$cache_file" ] && [ -s "$cache_file" ]; then
+        print_info "Using cached schema: $cache_file" >&2
+        echo "$cache_file"
+        return 0
+    fi
+
+    mkdir -p "$DB_SCHEMA_CACHE_DIR" 2>/dev/null
+
+    # Try each URL in order
+    local urls
+    urls=$(_schema_github_urls "$version" "$db_type")
+    while IFS= read -r url; do
+        print_info "Downloading schema from: $url" >&2
+        if curl -sSL --fail "$url" -o "$cache_file" 2>/dev/null; then
+            if [ -s "$cache_file" ]; then
+                print_info "Schema cached to: $cache_file" >&2
+                echo "$cache_file"
+                return 0
+            fi
+        fi
+        rm -f "$cache_file"
+    done <<< "$urls"
+
+    print_error "Failed to download schema for Nacos $version ($db_type)" >&2
+    print_info "Check that version tag '$version' exists at https://github.com/alibaba/nacos" >&2
+    return 1
+}

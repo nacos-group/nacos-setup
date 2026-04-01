@@ -90,6 +90,33 @@ if [ -f "$LIB_DIR/db_schema.sh" ]; then
 
     # Cleanup
     rm -rf /tmp/test_nacos_old /tmp/test_nacos_new /tmp/test_nacos_both
+
+    # --- download_schema / cache tests ---
+    echo ""
+    test_info "Testing download_schema cache logic"
+
+    # Test cache hit: pre-populate cache and verify it's used
+    TEST_CACHE_DIR="/tmp/test_db_schema_cache"
+    mkdir -p "$TEST_CACHE_DIR"
+    echo "-- cached mysql schema" > "$TEST_CACHE_DIR/3.2.0-mysql-schema.sql"
+
+    result=$(DB_SCHEMA_CACHE_DIR="$TEST_CACHE_DIR" download_schema "3.2.0" "mysql" 2>/dev/null)
+    if [ "$result" = "$TEST_CACHE_DIR/3.2.0-mysql-schema.sql" ]; then
+        test_pass "download_schema returns cached file when present"
+    else
+        test_fail "download_schema cache hit: expected cache path, got '$result'"
+    fi
+
+    # Test cache file naming convention
+    expected_cache_name="3.2.0-BETA-postgresql-schema.sql"
+    result=$(DB_SCHEMA_CACHE_DIR="$TEST_CACHE_DIR" _schema_cache_path "3.2.0-BETA" "postgresql")
+    if [ "$(basename "$result")" = "$expected_cache_name" ]; then
+        test_pass "Cache file naming: $expected_cache_name"
+    else
+        test_fail "Cache file naming: expected $expected_cache_name, got $(basename "$result")"
+    fi
+
+    rm -rf "$TEST_CACHE_DIR"
 else
     test_fail "db_schema.sh not found"
 fi

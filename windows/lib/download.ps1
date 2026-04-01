@@ -9,6 +9,26 @@ $Global:CacheDir = if ($env:NACOS_CACHE_DIR) { $env:NACOS_CACHE_DIR } else { Joi
 $Global:DownloadBaseUrl = "https://download.nacos.io/nacos-server"
 $Global:RefererUrl = "https://nacos.io/download/nacos-server/"
 
+# Ensure TLS 1.2 is active for this process — nacos-setup.ps1 already sets this at startup,
+# but this guard covers cases where lib/download.ps1 is dot-sourced from other entry points
+# (e.g. a cmd-spawned PowerShell that skipped the top-level initialisation).
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+} catch {
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+}
+
+function Download-File-WebClient($url, $output, $referer) {
+    Write-Detail "Retrying with WebClient: $url"
+    $wc = New-Object System.Net.WebClient
+    try {
+        if ($referer) { $wc.Headers.Add("Referer", $referer) }
+        $wc.DownloadFile($url, $output)
+    } finally {
+        $wc.Dispose()
+    }
+}
+
 function Download-File($url, $output) {
     # Set Referer header to match bash script behavior (required by some CDNs)
     $headers = @{
@@ -17,10 +37,18 @@ function Download-File($url, $output) {
     $prevProgress = $ProgressPreference
     $ProgressPreference = "SilentlyContinue"
     try {
-        if ($PSVersionTable.PSVersion.Major -lt 6) {
-            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers
-        } else {
-            Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers
+        try {
+            Write-Host "Downloading from URL: $url"
+            Write-Host "Headers: $headers"
+
+            if ($PSVersionTable.PSVersion.Major -lt 6) {
+                Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers -ErrorAction Stop
+            } else {
+                Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers -ErrorAction Stop
+            }
+        } catch {
+            Write-Warn "Invoke-WebRequest failed ($($_.Exception.Message)); retrying with WebClient..."
+            Download-File-WebClient $url $output $Global:RefererUrl
         }
     } finally {
         $ProgressPreference = $prevProgress

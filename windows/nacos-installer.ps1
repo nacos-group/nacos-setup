@@ -693,19 +693,20 @@ if ($reply -match '^[Nn]$') {
     Write-Info "  nacos-setup -v $serverVersion"
 } else {
     Write-Info "Starting Nacos $serverVersion via nacos-setup..."
-    $setupCmd = Join-Path $SetupRootDir $SetupCmdName
-    if (Test-Path $setupCmd) {
+    # Prefer calling the PS1 directly — avoids the powershell→cmd→powershell chain that can
+    # trigger network/TLS quirks (e.g. 405 from download.nacos.io) in cmd-spawned PS processes.
+    $setupPs1 = Join-Path $setupInstallDir $SetupScriptName
+    if (Test-Path $setupPs1) {
         try {
-            & cmd /c $setupCmd -v $serverVersion
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $setupPs1 -v $serverVersion
         } catch {
             Write-Warn "nacos-setup exited with: $($_.Exception.Message)"
         }
     } else {
-        # Fallback: invoke PS1 directly
-        $setupPs1 = Join-Path $setupInstallDir $SetupScriptName
-        if (Test-Path $setupPs1) {
+        $setupCmd = Join-Path $SetupRootDir $SetupCmdName
+        if (Test-Path $setupCmd) {
             try {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $setupPs1 -v $serverVersion
+                & cmd /c $setupCmd -v $serverVersion
             } catch {
                 Write-Warn "nacos-setup exited with: $($_.Exception.Message)"
             }

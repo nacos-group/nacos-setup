@@ -117,6 +117,38 @@ if [ -f "$LIB_DIR/db_schema.sh" ]; then
     fi
 
     rm -rf "$TEST_CACHE_DIR"
+
+    # --- db_schema_main integration tests ---
+    echo ""
+    test_info "Testing db_schema_main function"
+
+    # Test: stderr/stdout separation — log messages should NOT appear in stdout
+    TEST_CACHE_DIR2="/tmp/test_db_schema_main"
+    mkdir -p "$TEST_CACHE_DIR2"
+    echo "CREATE TABLE test_table (id INT);" > "$TEST_CACHE_DIR2/3.2.0-mysql-schema.sql"
+
+    stdout_output=$(DB_SCHEMA_CACHE_DIR="$TEST_CACHE_DIR2" NACOS_INSTALL_BASE="/tmp/nonexistent" db_schema_main "3.2.0" "mysql" 2>/dev/null)
+    if echo "$stdout_output" | grep -q "CREATE TABLE"; then
+        test_pass "db_schema_main outputs SQL to stdout"
+    else
+        test_fail "db_schema_main should output SQL to stdout, got: '$stdout_output'"
+    fi
+
+    if echo "$stdout_output" | grep -q "\[INFO\]"; then
+        test_fail "db_schema_main should not leak log messages to stdout"
+    else
+        test_pass "db_schema_main keeps log messages on stderr only"
+    fi
+
+    # Test: invalid type reports error
+    stderr_output=$(db_schema_main "3.2.0" "oracle" 2>&1 >/dev/null)
+    if echo "$stderr_output" | grep -qi "unsupported"; then
+        test_pass "db_schema_main reports error for invalid type"
+    else
+        test_fail "db_schema_main should report unsupported type error"
+    fi
+
+    rm -rf "$TEST_CACHE_DIR2"
 else
     test_fail "db_schema.sh not found"
 fi

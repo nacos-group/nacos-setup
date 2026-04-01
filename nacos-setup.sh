@@ -146,6 +146,10 @@ DB_CONF_MODE=""
 DB_CONF_FILE=""
 DB_CONF_ACTION=""
 
+# Database schema export mode
+DB_SCHEMA_MODE=false
+DB_SCHEMA_TYPE=""
+
 # ============================================================================
 # Usage Information
 # ============================================================================
@@ -174,6 +178,7 @@ COMMON OPTIONS:
     -db-conf [NAME]               Use external datasource (default: default)
     db-conf edit [NAME]           Edit datasource configuration
     db-conf show [NAME]           Show datasource configuration
+    db-schema [-v VERSION] [--type TYPE]  Export database schema SQL to stdout
     -h, --help                     Show this help message
 
 STANDALONE MODE OPTIONS:
@@ -223,6 +228,16 @@ EXAMPLES:
   Configuration:
     # Configure global database settings
     bash nacos-setup.sh --datasource-conf
+
+  Database Schema:
+    # Export MySQL schema for version 3.2.0
+    bash nacos-setup.sh db-schema -v 3.2.0 --type mysql
+
+    # Export and pipe directly to database
+    bash nacos-setup.sh db-schema -v 3.2.0 --type mysql | mysql -h localhost -u root -p nacos
+
+    # Interactive mode (prompts for version and type)
+    bash nacos-setup.sh db-schema
 
 VERSION REQUIREMENTS:
     - Minimum supported: Nacos 2.4.0
@@ -285,6 +300,36 @@ parse_arguments() {
                     print_error "db-conf requires a subcommand: edit or show"
                     exit 1
                 fi
+                ;;
+            db-schema)
+                DB_SCHEMA_MODE=true
+                shift
+                # Parse db-schema specific options
+                while [[ $# -gt 0 ]]; do
+                    case $1 in
+                        -v|--version)
+                            if [ -z "$2" ] || [[ "$2" == -* ]]; then
+                                print_error "db-schema: -v/--version requires a version number"
+                                exit 1
+                            fi
+                            VERSION="$2"
+                            USER_SPECIFIED_VERSION=true
+                            shift 2
+                            ;;
+                        -t|--type)
+                            if [ -z "$2" ] || [[ "$2" == -* ]]; then
+                                print_error "db-schema: --type requires a database type (mysql/postgresql)"
+                                exit 1
+                            fi
+                            DB_SCHEMA_TYPE="$2"
+                            shift 2
+                            ;;
+                        *)
+                            print_error "Unknown db-schema option: $1"
+                            exit 1
+                            ;;
+                    esac
+                done
                 ;;
             --adv)
                 ADVANCED_MODE=true
@@ -487,6 +532,17 @@ main() {
                 # Continue to normal installation flow (will init version below)
                 ;;
         esac
+    fi
+
+    # Handle db-schema mode (local mode, doesn't need version fetching or Java)
+    if [ "$DB_SCHEMA_MODE" = true ]; then
+        source "$LIB_DIR/db_schema.sh"
+        local schema_version=""
+        if [ "$USER_SPECIFIED_VERSION" = true ]; then
+            schema_version="$VERSION"
+        fi
+        db_schema_main "$schema_version" "$DB_SCHEMA_TYPE"
+        exit $?
     fi
 
     # Initialize version (fetch from remote only if user didn't specify -v)

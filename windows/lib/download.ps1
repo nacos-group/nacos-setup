@@ -40,16 +40,21 @@ function Download-Nacos($version) {
 
     $cachedItem = Get-Item -Path $cached -ErrorAction SilentlyContinue
     if ($cachedItem -and $cachedItem.Length -gt 0) {
-        Write-Detail "Found cached package: $cached"
-        try {
-            $f = Get-Item $cached
-            $mb = [math]::Round($f.Length / 1MB, 2)
-            Write-Detail "Package size: $mb MB"
-        } catch {}
-        if (Test-NacosSetupVerbose) {
-            Write-Detail "Skipping download, using cached file"
+        if (-not (Test-ZipArchiveValid $cached)) {
+            Write-Warn "Cached package is invalid or incomplete (not a valid zip); removing and re-downloading: $cached"
+            Remove-Item -LiteralPath $cached -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-Detail "Found cached package: $cached"
+            try {
+                $f = Get-Item $cached
+                $mb = [math]::Round($f.Length / 1MB, 2)
+                Write-Detail "Package size: $mb MB"
+            } catch {}
+            if (Test-NacosSetupVerbose) {
+                Write-Detail "Skipping download, using cached file"
+            }
+            return $cached
         }
-        return $cached
     }
 
     Write-Detail "Downloading Nacos version: $version"
@@ -57,6 +62,10 @@ function Download-Nacos($version) {
     Write-Detail "Saving to: $cached"
     Download-File $downloadUrl $cached
     Write-Detail "Download completed: $zipName"
+    if (-not (Test-ZipArchiveValid $cached)) {
+        Remove-Item -LiteralPath $cached -Force -ErrorAction SilentlyContinue
+        throw "Downloaded Nacos package is not a valid zip file (network interruption, proxy, or CDN issue). Retry or remove the cache folder under $($Global:CacheDir) and run again."
+    }
     return $cached
 }
 

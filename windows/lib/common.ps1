@@ -90,6 +90,25 @@ function Ensure-Directory($path) {
     if (-not (Test-Path $path)) { New-Item -ItemType Directory -Path $path | Out-Null }
 }
 
+# True if Path is a complete ZIP (EOCD present). Rejects truncated downloads and other non-archives.
+function Test-ZipArchiveValid {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) { return $false }
+
+    $len = (Get-Item $Path).Length
+    if ($len -lt 22) { return $false }
+
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($Path)
+        $zip.Dispose()
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 # Remove a directory tree: retries (handles transient locks), \\?\ long-path prefix, then robocopy /MIR
 # to empty deeply nested trees that exceed MAX_PATH or confuse Remove-Item (e.g. Office-schema paths in JAR tooling).
 function Remove-DirectoryRobust {

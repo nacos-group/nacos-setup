@@ -34,21 +34,6 @@ function Test-DefaultDataImportForceRequested {
     return $env:NACOS_SETUP_FORCE_DEFAULT_DATA_IMPORT -in @("1", "true", "TRUE", "yes", "YES")
 }
 
-function Test-ZipArchiveValid {
-    param([string]$Path)
-
-    if (-not (Test-Path $Path)) { return $false }
-
-    try {
-        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
-        $zip = [System.IO.Compression.ZipFile]::OpenRead($Path)
-        $zip.Dispose()
-        return $true
-    } catch {
-        return $false
-    }
-}
-
 function Get-DefaultDataArchive {
     param(
         [string]$ArchiveName,

@@ -207,7 +207,7 @@ db_schema_main() {
 
     # Try local first
     local schema_file
-    schema_file=$(find_local_schema "$version" "$db_type" 2>/dev/null)
+    schema_file=$(find_local_schema "$version" "$db_type" 2>/dev/null) || true
 
     # Fallback to download
     if [ -z "$schema_file" ]; then

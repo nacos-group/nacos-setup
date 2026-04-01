@@ -41,6 +41,12 @@ function Apply-DatasourceConfig($configFile, $datasourceFile) {
             Update-ConfigProperty $configFile $key $value
         }
     }
+    $joined = ($lines | ForEach-Object { $_ }) -join "`n"
+    if (($joined -match 'spring\.(sql\.init|datasource)\.platform\s*=\s*postgresql') -or ($joined -match '(?m)^db\.url\.\d+=jdbc:postgresql:')) {
+        if ($joined -notmatch '(?m)^db\.pool\.config\.driverClassName=') {
+            Update-ConfigProperty $configFile "db.pool.config.driverClassName" "org.postgresql.Driver"
+        }
+    }
     return $true
 }
 
@@ -65,23 +71,26 @@ function Configure-Standalone-Security($configFile, $advancedMode) {
         $Global:IDENTITY_KEY = "nacos_identity_" + [int][double]::Parse((Get-Date -UFormat %s))
         $Global:IDENTITY_VALUE = (Generate-SecretKey).Substring(0,16)
         $Global:NACOS_PASSWORD = Generate-Password
-        
-        Write-Host ""
-        Write-Info "===================================="
-        Write-Info "Auto-Generated Security Configuration"
-        Write-Info "===================================="
-        Write-Host ""
-        Write-Host "JWT Token Secret Key:"
-        Write-Host "  $($Global:TOKEN_SECRET)"
-        Write-Host ""
-        Write-Host "Server Identity Key:"
-        Write-Host "  $($Global:IDENTITY_KEY)"
-        Write-Host ""
-        Write-Host "Server Identity Value:"
-        Write-Host "  $($Global:IDENTITY_VALUE)"
-        Write-Host ""
-        Write-Info "These credentials will be automatically configured"
-        Write-Info "Admin password will be set after Nacos starts"
+
+        # Align with bash configure_standalone_security: show generated keys only when -x/--verbose
+        if (Test-NacosSetupVerbose) {
+            Write-Host ""
+            Write-Info "===================================="
+            Write-Info "Auto-Generated Security Configuration"
+            Write-Info "===================================="
+            Write-Host ""
+            Write-Host "JWT Token Secret Key:"
+            Write-Host "  $($Global:TOKEN_SECRET)"
+            Write-Host ""
+            Write-Host "Server Identity Key:"
+            Write-Host "  $($Global:IDENTITY_KEY)"
+            Write-Host ""
+            Write-Host "Server Identity Value:"
+            Write-Host "  $($Global:IDENTITY_VALUE)"
+            Write-Host ""
+            Write-Info "These credentials will be automatically configured"
+            Write-Info "Admin password will be set after Nacos starts"
+        }
     } else {
         $Global:TOKEN_SECRET = Read-Host "Enter JWT token secret key (empty for auto)"
         if (-not $Global:TOKEN_SECRET) { $Global:TOKEN_SECRET = Generate-SecretKey }
@@ -97,33 +106,36 @@ function Configure-Standalone-Security($configFile, $advancedMode) {
 }
 
 function Configure-Cluster-Security($clusterDir, $advancedMode) {
-    Write-Host ""
-    
+    if (Test-NacosSetupVerbose) { Write-Host "" }
+
     if (-not $advancedMode) {
-        Write-Info "Simplified mode: Auto-generating shared security keys for cluster..."
-        
+        Write-Detail "Simplified mode: Auto-generating shared security keys for cluster..."
+
         $Global:TOKEN_SECRET = Generate-SecretKey
         $Global:IDENTITY_KEY = "nacos_cluster_" + [int][double]::Parse((Get-Date -UFormat %s))
         $Global:IDENTITY_VALUE = (Generate-SecretKey).Substring(0,16)
         $Global:NACOS_PASSWORD = Generate-Password
-        
-        Write-Host ""
-        Write-Info "==========================================="
-        Write-Info "Auto-Generated Cluster Security Configuration"
-        Write-Info "==========================================="
-        Write-Host ""
-        Write-Host "JWT Token Secret Key:"
-        Write-Host "  $($Global:TOKEN_SECRET)"
-        Write-Host ""
-        Write-Host "Server Identity Key:"
-        Write-Host "  $($Global:IDENTITY_KEY)"
-        Write-Host ""
-        Write-Host "Server Identity Value:"
-        Write-Host "  $($Global:IDENTITY_VALUE)"
-        Write-Host ""
-        Write-Info "These credentials will be shared across all cluster nodes"
-        Write-Info "Admin password will be set after cluster startup"
-        Write-Host ""
+
+        # Align with bash configure_cluster_security: banner only when -x/--verbose
+        if (Test-NacosSetupVerbose) {
+            Write-Host ""
+            Write-Info "==========================================="
+            Write-Info "Auto-Generated Cluster Security Configuration"
+            Write-Info "==========================================="
+            Write-Host ""
+            Write-Host "JWT Token Secret Key:"
+            Write-Host "  $($Global:TOKEN_SECRET)"
+            Write-Host ""
+            Write-Host "Server Identity Key:"
+            Write-Host "  $($Global:IDENTITY_KEY)"
+            Write-Host ""
+            Write-Host "Server Identity Value:"
+            Write-Host "  $($Global:IDENTITY_VALUE)"
+            Write-Host ""
+            Write-Info "These credentials will be shared across all cluster nodes"
+            Write-Info "Admin password will be set after cluster startup"
+            Write-Host ""
+        }
     } else {
         $Global:TOKEN_SECRET = Read-Host "Enter JWT token secret key (empty for auto)"
         if (-not $Global:TOKEN_SECRET) { $Global:TOKEN_SECRET = Generate-SecretKey }
@@ -144,7 +156,7 @@ nacos.core.auth.server.identity.value=$($Global:IDENTITY_VALUE)
 admin.password=$($Global:NACOS_PASSWORD)
 "@ | Set-Content -Path $shareFile -Encoding UTF8
     
-    Write-Info "Security configuration saved to: $shareFile"
+    Write-Detail "Security configuration saved to: $shareFile"
 }
 
 function Update-PortConfig($configFile, $serverPort, $consolePort, $nacosVersion) {
@@ -233,6 +245,15 @@ function Edit-DatasourceConfig($configName = $null) {
         "db.user.0=$dbUser",
         "db.password.0=$passPlain"
     )
+    if ($dbType -eq "postgresql") {
+        $configLines += @(
+            "db.pool.config.connectionTimeout=30000",
+            "db.pool.config.validationTimeout=10000",
+            "db.pool.config.maximumPoolSize=20",
+            "db.pool.config.minimumIdle=2",
+            "db.pool.config.driverClassName=org.postgresql.Driver"
+        )
+    }
     $configLines | Set-Content -Path $targetFile -Encoding UTF8
 
     Write-Host ""

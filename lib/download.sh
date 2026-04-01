@@ -34,7 +34,7 @@ REFERER_URL="https://nacos.io/download/nacos-server/?spm=nacos_install"
 
 # Get latest Nacos version from GitHub API
 get_latest_version() {
-    print_info "Fetching latest Nacos version..."
+    print_detail "Fetching latest Nacos version..."
     
     local latest_version=$(curl -fsSL https://api.github.com/repos/alibaba/nacos/releases/latest 2>/dev/null | \
         sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' | head -1)
@@ -67,9 +67,9 @@ download_nacos() {
     if [ -f "$cached_file" ] && [ -s "$cached_file" ]; then
         # Verify the cached zip file is valid
         if unzip -t "$cached_file" >/dev/null 2>&1; then
-            print_info "Found cached package: $cached_file" >&2
-            print_info "Skipping download, using cached file" >&2
-            echo "" >&2
+            print_detail "Found cached package: $cached_file" >&2
+            print_detail "Skipping download, using cached file" >&2
+            if [ "$VERBOSE" = true ]; then echo "" >&2; fi
             echo "$cached_file"
             return 0
         else
@@ -79,13 +79,15 @@ download_nacos() {
     fi
     
     # Download the file
-    print_info "Downloading Nacos version: $version" >&2
-    print_info "Download URL: $download_url" >&2
-    echo "" >&2
+    print_detail "Downloading Nacos version: $version" >&2
+    print_detail "Download URL: $download_url" >&2
+    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
     
-    # Download with progress bar and Referer header
-    if curl -fL -# -H "Referer: $REFERER_URL" -o "$cached_file" "$download_url" >&2; then
-        echo "" >&2
+    # Download with progress bar (verbose) or silently
+    local curl_progress_flag="-s"
+    if [ "$VERBOSE" = true ]; then curl_progress_flag="-#"; fi
+    if curl -fL $curl_progress_flag -H "Referer: $REFERER_URL" -o "$cached_file" "$download_url" >&2; then
+        if [ "$VERBOSE" = true ]; then echo "" >&2; fi
         
         # Verify downloaded file is a valid zip
         if ! unzip -t "$cached_file" >/dev/null 2>&1; then
@@ -94,11 +96,11 @@ download_nacos() {
             return 1
         fi
         
-        print_info "Download completed: $zip_filename" >&2
+        print_detail "Download completed: $zip_filename" >&2
         echo "$cached_file"
         return 0
     else
-        echo "" >&2
+        if [ "$VERBOSE" = true ]; then echo "" >&2; fi
         print_error "Failed to download Nacos $version" >&2
         print_info "Please check if version $version exists" >&2
         print_info "Available versions: https://github.com/alibaba/nacos/releases" >&2
@@ -118,7 +120,7 @@ extract_nacos_to_temp() {
     local zip_file=$1
     local tmp_dir="/tmp/nacos-extract-$$"
     
-    print_info "Extracting Nacos package..." >&2
+    print_detail "Extracting Nacos package..." >&2
     
     # Verify zip file exists
     if [ ! -f "$zip_file" ]; then
@@ -176,11 +178,11 @@ extract_nacos_to_target() {
     local node_name=$3
     local final_path="$target_base_dir/$node_name"
     
-    print_info "Setting up: $node_name..." >&2
+    print_detail "Setting up: $node_name..." >&2
     
     # Remove existing directory if present
     if [ -d "$final_path" ]; then
-        print_info "Removing existing directory: $final_path" >&2
+        print_detail "Removing existing directory: $final_path" >&2
         rm -rf "$final_path"
     fi
     
@@ -204,8 +206,8 @@ extract_nacos_to_target() {
         
         # Set permissions
         chmod +x "$final_path/bin/"*.sh 2>/dev/null || true
-        
-        print_info "Node extracted: $final_path" >&2
+
+        print_detail "Node extracted: $final_path" >&2
         return 0
     else
         print_error "Extracted package structure is unexpected" >&2
@@ -238,11 +240,11 @@ install_nacos() {
     
     # Remove old installation if exists
     if [ -d "$target_dir" ]; then
-        print_info "Removing old installation: $target_dir"
+        print_detail "Removing old installation: $target_dir"
         rm -rf "$target_dir"
     fi
     
-    print_info "Installing Nacos to: $target_dir"
+    print_detail "Installing Nacos to: $target_dir"
     
     # Create parent directory
     mkdir -p "$(dirname "$target_dir")"
@@ -261,8 +263,8 @@ install_nacos() {
     
     # Set permissions for bin scripts
     chmod +x "$target_dir/bin/"*.sh 2>/dev/null || true
-    
-    print_info "Installation completed: $target_dir"
+
+    print_detail "Installation completed: $target_dir"
     return 0
 }
 
@@ -275,7 +277,7 @@ cleanup_temp_dir() {
     local temp_dir=$1
     
     if [ -n "$temp_dir" ] && [ -d "$temp_dir" ]; then
-        print_info "Cleaning up temporary files..."
+        print_detail "Cleaning up temporary files..."
         rm -rf "$temp_dir"
     fi
 }

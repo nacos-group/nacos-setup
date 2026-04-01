@@ -59,6 +59,15 @@ $script:VersionsFetched = $false
 # ============================================================================
 
 function Write-VersionInfo($msg) {
+    # Align with bash: remote version fetch chatter is print_detail (only with -x / NACOS_SETUP_VERBOSE)
+    if (Get-Command Test-NacosSetupVerbose -ErrorAction SilentlyContinue) {
+        if (Test-NacosSetupVerbose) {
+            if (Get-Command Write-Detail -ErrorAction SilentlyContinue) { Write-Detail $msg }
+            elseif (Get-Command Write-Info -ErrorAction SilentlyContinue) { Write-Info $msg }
+            else { Write-Host "[INFO] $msg" -ForegroundColor Cyan }
+        }
+        return
+    }
     if (Get-Command Write-Info -ErrorAction SilentlyContinue) {
         Write-Info $msg
     } else {

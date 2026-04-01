@@ -465,29 +465,40 @@ install_nacos_setup() {
 # nacos-cli Installation
 # ============================================================================
 
+# If /usr/local/bin is writable, symlink nacos-cli there so typical PATH (e.g. root)
+# includes the command immediately — subprocess installers cannot export PATH to the parent shell.
+_nacos_try_link_nacos_cli_system_symlink() {
+    local src="$1"
+    local dst="/usr/local/bin/nacos-cli"
+    [ -n "$src" ] && [ -f "$src" ] || return 0
+    if [ ! -d /usr/local/bin ]; then
+        mkdir -p /usr/local/bin 2>/dev/null || return 0
+    fi
+    if [ ! -w /usr/local/bin ]; then
+        return 0
+    fi
+    if ln -sf "$src" "$dst" 2>/dev/null; then
+        print_success "Linked nacos-cli to $dst (available in this shell without source ~/.bashrc)"
+    fi
+}
+
 install_nacos_cli() {
     local version="${NACOS_CLI_VERSION}"
 
     print_info "Preparing to install nacos-cli version $version..."
 
-    # Detect OS
     local os=""
     if [[ "$OSTYPE" == "darwin"* ]]; then
         os="darwin"
     elif [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "linux"* ]]; then
         os="linux"
-    elif [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "cygwin"* ]] || [[ "$OSTYPE" == "win32"* ]]; then
-        os="windows"
     else
-        # Try using uname as fallback
         local uname_os
         uname_os=$(uname -s 2>/dev/null || echo "")
         if [[ "$uname_os" == "Darwin" ]]; then
             os="darwin"
         elif [[ "$uname_os" == "Linux" ]]; then
             os="linux"
-        elif [[ "$uname_os" == MINGW* ]] || [[ "$uname_os" == MSYS* ]] || [[ "$uname_os" == CYGWIN* ]]; then
-            os="windows"
         else
             print_warn "Unsupported OS for nacos-cli: $OSTYPE (uname: $uname_os)"
             return 1
@@ -539,35 +550,17 @@ install_nacos_cli() {
         return 1
     fi
 
-    # Expected binary filename: nacos-cli-{version}-{os}-{arch} or nacos-cli-{version}-{os}-{arch}.exe
+    # Expected binary: nacos-cli-{version}-{os}-{arch}
     local expected_binary_name="nacos-cli-${version}-${os}-${arch}"
     local expected_binary_name_exe="${expected_binary_name}.exe"
     local binary_path
-    
-    # For Windows, prioritize .exe files; for others, prioritize files without extension
-    if [[ "$os" == "windows" ]]; then
-        # Try .exe first for Windows
+    binary_path=$(find "$tmp_dir" -name "$expected_binary_name" -type f | head -1)
+    if [ -z "$binary_path" ]; then
         binary_path=$(find "$tmp_dir" -name "$expected_binary_name_exe" -type f | head -1)
-        # Fallback to non-.exe (shouldn't happen, but just in case)
-        if [ -z "$binary_path" ]; then
-            binary_path=$(find "$tmp_dir" -name "$expected_binary_name" -type f | head -1)
-        fi
-    else
-        # For non-Windows, try without .exe first
-        binary_path=$(find "$tmp_dir" -name "$expected_binary_name" -type f | head -1)
-        # Fallback to .exe (shouldn't happen, but just in case)
-        if [ -z "$binary_path" ]; then
-            binary_path=$(find "$tmp_dir" -name "$expected_binary_name_exe" -type f | head -1)
-        fi
     fi
 
     if [ -z "$binary_path" ] || [ ! -f "$binary_path" ]; then
-        local expected_names="$expected_binary_name"
-        if [[ "$os" == "windows" ]]; then
-            expected_names="$expected_binary_name_exe (or $expected_binary_name)"
-        else
-            expected_names="$expected_binary_name (or $expected_binary_name_exe)"
-        fi
+        local expected_names="$expected_binary_name (or $expected_binary_name_exe)"
         print_error "Binary file not found in package. Expected: $expected_names"
         print_info "Available files in package:"
         find "$tmp_dir" -type f | sed 's|^|  |'
@@ -578,11 +571,7 @@ install_nacos_cli() {
     # Ensure bin dir exists
     mkdir -p "$BIN_DIR"
 
-    # Determine target binary name (add .exe for Windows)
     local target_binary_name="nacos-cli"
-    if [[ "$os" == "windows" ]]; then
-        target_binary_name="nacos-cli.exe"
-    fi
 
     # Install binary
     if ! cp "$binary_path" "$BIN_DIR/$target_binary_name"; then
@@ -591,13 +580,11 @@ install_nacos_cli() {
         return 1
     fi
 
-    # Set executable permission (not needed on Windows, but harmless)
     if ! chmod +x "$BIN_DIR/$target_binary_name" 2>/dev/null; then
-        # On Windows, chmod might fail, which is fine
-        if [[ "$os" != "windows" ]]; then
-            print_warn "Failed to mark nacos-cli as executable: $BIN_DIR/$target_binary_name"
-        fi
+        print_warn "Failed to mark nacos-cli as executable: $BIN_DIR/$target_binary_name"
     fi
+
+    _nacos_try_link_nacos_cli_system_symlink "$BIN_DIR/$target_binary_name"
 
     # On macOS, add ad-hoc signature to avoid Gatekeeper killing the binary
     if [[ "$os" == "darwin" ]]; then
@@ -614,6 +601,101 @@ install_nacos_cli() {
     rm -rf "$tmp_dir"
 
     print_success "nacos-cli $version installed to $BIN_DIR/$target_binary_name"
+}
+
+# ============================================================================
+# PATH: ensure ~/.nacos/bin is on PATH (shell rc + optional current session)
+# ============================================================================
+
+# Resolve which rc file to append the PATH line to (macOS/Linux differ for bash).
+_resolve_shell_rc_for_path() {
+    local shell_config=""
+    if [ -n "$SHELL" ]; then
+        case "$SHELL" in
+            */zsh)
+                shell_config="$HOME/.zshrc"
+                ;;
+            */bash)
+                if [ -f "$HOME/.bashrc" ]; then
+                    shell_config="$HOME/.bashrc"
+                elif [ -f "$HOME/.bash_profile" ]; then
+                    shell_config="$HOME/.bash_profile"
+                elif [ -f "$HOME/.profile" ]; then
+                    shell_config="$HOME/.profile"
+                else
+                    shell_config="$HOME/.bashrc"
+                fi
+                ;;
+        esac
+    fi
+
+    if [ -z "$shell_config" ]; then
+        if [ -f "$HOME/.zshrc" ]; then
+            shell_config="$HOME/.zshrc"
+        elif [ -f "$HOME/.bashrc" ]; then
+            shell_config="$HOME/.bashrc"
+        elif [ -f "$HOME/.bash_profile" ]; then
+            shell_config="$HOME/.bash_profile"
+        elif [ -f "$HOME/.profile" ]; then
+            shell_config="$HOME/.profile"
+        else
+            shell_config="$HOME/.bashrc"
+        fi
+    fi
+    printf '%s' "$shell_config"
+}
+
+# True only when this script was sourced (e.g. source nacos-installer.sh), so export
+# affects the caller's shell. When run as "bash nacos-installer.sh", this is false:
+# a child process cannot change the parent interactive shell's environment.
+_nacos_installer_can_affect_calling_shell() {
+    [[ -n "${BASH_VERSION:-}" ]] && [[ "${BASH_SOURCE[0]}" != "${0}" ]]
+}
+
+ensure_nacos_bin_in_path() {
+    # Check if BIN_DIR is already in PATH
+    case ":$PATH:" in
+        *":$BIN_DIR:"*)
+            print_info "$BIN_DIR is already in PATH"
+            ;;
+        *)
+            print_info "Configuring PATH automatically..."
+
+            local shell_config
+            shell_config=$(_resolve_shell_rc_for_path)
+
+            # Check if the export line already exists in the config file (idempotent)
+            local path_export_line='export PATH="$HOME/.nacos/bin:$PATH"'
+            if grep -qF "$path_export_line" "$shell_config" 2>/dev/null; then
+                print_info "PATH already configured in $shell_config"
+            else
+                echo "" >> "$shell_config"
+                echo "# Added by nacos-setup installer" >> "$shell_config"
+                echo "$path_export_line" >> "$shell_config"
+                print_success "PATH configured in $shell_config"
+            fi
+
+            # Ask user whether to show / apply PATH for the current terminal
+            # With set -e, read must not fail the script on EOF (e.g. curl | bash).
+            REPLY=""
+            read -r -p "Show command to use nacos-cli in this terminal now? (Y/n): " REPLY || REPLY=y
+            echo ""
+            if [[ "$REPLY" =~ ^[Nn]$ ]]; then
+                print_info "To use nacos-cli later in this shell, run: source $shell_config"
+                print_info "Or open a new terminal (login shells load the file above)."
+            else
+                if _nacos_installer_can_affect_calling_shell; then
+                    export PATH="$HOME/.nacos/bin:$PATH"
+                    print_success "PATH has been activated in the current shell."
+                else
+                    print_info "This installer runs as a subprocess; it cannot change your interactive shell's PATH."
+                    print_info "Run one of the following in this terminal, then use nacos-cli:"
+                    echo "  source $shell_config"
+                    echo "  export PATH=\"\$HOME/.nacos/bin:\$PATH\""
+                fi
+            fi
+            ;;
+    esac
 }
 
 # ============================================================================
@@ -641,62 +723,7 @@ verify_installation() {
         fi
     fi
     
-    # Check if BIN_DIR is already in PATH
-    case ":$PATH:" in
-        *":$BIN_DIR:"*)
-            print_info "$BIN_DIR is already in PATH"
-            ;;
-        *)
-            print_info "Configuring PATH automatically..."
-
-            # Detect shell configuration file
-            local shell_config=""
-            if [ -n "$SHELL" ]; then
-                case "$SHELL" in
-                    */zsh)
-                        shell_config="$HOME/.zshrc"
-                        ;;
-                    */bash)
-                        shell_config="$HOME/.bashrc"
-                        ;;
-                esac
-            fi
-
-            # Fallback: detect by checking which file exists
-            if [ -z "$shell_config" ]; then
-                if [ -f "$HOME/.zshrc" ]; then
-                    shell_config="$HOME/.zshrc"
-                elif [ -f "$HOME/.bashrc" ]; then
-                    shell_config="$HOME/.bashrc"
-                else
-                    # Create .bashrc if nothing exists
-                    shell_config="$HOME/.bashrc"
-                fi
-            fi
-
-            # Check if the export line already exists in the config file (idempotent)
-            local path_export_line='export PATH="$HOME/.nacos/bin:$PATH"'
-            if grep -qF "$path_export_line" "$shell_config" 2>/dev/null; then
-                print_info "PATH already configured in $shell_config"
-            else
-                echo "" >> "$shell_config"
-                echo "# Added by nacos-setup installer" >> "$shell_config"
-                echo "$path_export_line" >> "$shell_config"
-                print_success "PATH configured in $shell_config"
-            fi
-
-            # Ask user whether to activate PATH now
-            read -p "Activate PATH now? (Y/n): " -r REPLY
-            echo ""
-            if [[ "$REPLY" =~ ^[Nn]$ ]]; then
-                print_info "To activate PATH manually, run: source $shell_config"
-                print_info "Or open a new terminal session."
-            else
-                export PATH="$HOME/.nacos/bin:$PATH"
-                print_success "PATH has been activated in the current session."
-            fi
-            ;;
-    esac
+    ensure_nacos_bin_in_path
     
     print_success "Installation verified successfully!"
     echo ""
@@ -716,13 +743,18 @@ print_usage_info() {
         install_location="$INSTALL_BASE_DIR/$(readlink "$INSTALL_BASE_DIR/$CURRENT_LINK")"
     fi
 
+    local cli_status="not installed"
+    if [ -x "$BIN_DIR/nacos-cli" ]; then
+        cli_status="installed"
+    fi
+
     echo "========================================"
     echo "  Nacos Setup Installation Complete"
     echo "========================================"
     echo ""
-    echo "Version: $version"
+    echo "nacos-setup version: $version"
+    echo "nacos-cli: $cli_status"
     echo "Installation location: $install_location"
-    echo "Global command: $SCRIPT_NAME"
     echo ""
     echo "Quick Start:"
     echo ""
@@ -793,6 +825,16 @@ uninstall_nacos_setup() {
         print_success "Removed $BIN_DIR/$SCRIPT_NAME"
     fi
 
+    # Remove installer symlink in /usr/local/bin if it points to our nacos-cli
+    if [ -L /usr/local/bin/nacos-cli ]; then
+        local link_tgt
+        link_tgt=$(readlink /usr/local/bin/nacos-cli 2>/dev/null || true)
+        if [[ "$link_tgt" == "$BIN_DIR/nacos-cli" ]]; then
+            rm -f /usr/local/bin/nacos-cli
+            print_success "Removed /usr/local/bin/nacos-cli"
+        fi
+    fi
+
     # Remove nacos-cli binary
     if [ -f "$BIN_DIR/nacos-cli" ]; then
         rm -f "$BIN_DIR/nacos-cli"
@@ -816,6 +858,10 @@ main() {
     echo "  Nacos Setup Installer"
     echo "========================================"
     echo ""
+    echo "    curl -fsSL https://nacos.io/nacos-installer.sh | bash"
+    echo ""
+    echo "========================================"
+    echo ""
 
     # Initialize versions (fetch from remote or use fallback)
     get_all_versions 1
@@ -823,7 +869,6 @@ main() {
     echo ""
 
     # Parse arguments
-    local install_cli=false
     local only_cli=false
     local cli_version=""
     local setup_version=""
@@ -839,7 +884,6 @@ main() {
                 exit 0
                 ;;
             --cli)
-                install_cli=true
                 only_cli=true
                 shift
                 ;;
@@ -852,7 +896,7 @@ main() {
                     exit 1
                 fi
                 # 根据模式决定版本类型
-                if [[ "$install_cli" == true ]]; then
+                if [[ "$only_cli" == true ]]; then
                     cli_version="$2"
                 else
                     setup_version="$2"
@@ -860,12 +904,13 @@ main() {
                 shift 2
                 ;;
             --help|-h)
-                echo "Usage: curl -fsSL https://nacos.io/installer.sh | bash"
-                echo ""
                 echo "Install nacos-setup and nacos-cli tools for managing Nacos instances."
                 echo ""
+                echo "Usage:"
+                echo "    curl -fsSL https://nacos.io/nacos-installer.sh | bash"
+                echo ""
                 echo "Options:"
-                echo "  (none)              Install nacos-setup"
+                echo "  (none)              Install nacos-setup + nacos-cli (default)"
                 echo "  -v, --version       Specify version (nacos-setup or nacos-cli with --cli)"
                 echo "  --cli               Install nacos-cli only"
                 echo "  version             Show installed version"
@@ -873,10 +918,10 @@ main() {
                 echo "  --help, -h          Show this help message"
                 echo ""
                 echo "Examples:"
-                echo "  ./nacos-installer.sh                    Install latest nacos-setup"
-                echo "  ./nacos-installer.sh -v 0.0.3           Install nacos-setup v0.0.3"
-                echo "  ./nacos-installer.sh --cli              Install latest nacos-cli"
-                echo "  ./nacos-installer.sh --cli -v 0.0.3     Install nacos-cli v0.0.3"
+                echo "  ./nacos-installer.sh                    Install nacos-setup + nacos-cli"
+                echo "  ./nacos-installer.sh -v 0.0.3           Install nacos-setup v0.0.3 + nacos-cli"
+                echo "  ./nacos-installer.sh --cli              Install nacos-cli only"
+                echo "  ./nacos-installer.sh --cli -v 0.0.3     Install nacos-cli v0.0.3 only"
                 echo ""
                 echo "After installation, use 'nacos-setup' command to manage Nacos:"
                 echo "  nacos-setup --help              Show nacos-setup help"
@@ -915,33 +960,40 @@ main() {
 
     if [[ "$only_cli" == true ]]; then
         echo ""
-        install_nacos_cli
-        exit $?
+        if ! install_nacos_cli; then
+            exit 1
+        fi
+        echo ""
+        ensure_nacos_bin_in_path
+        print_info "After PATH is loaded in your shell (see above), run: nacos-cli --help"
+        exit 0
     fi
 
-    # Install
+    # Install nacos-setup
     install_nacos_setup "$setup_version"
 
-    # Verify
-    if verify_installation; then
-        print_usage_info
-    else
+    # Verify nacos-setup installation
+    if ! verify_installation; then
         print_error "Installation verification failed"
         exit 1
     fi
 
-    # Install nacos-cli if --cli flag is provided
-    if [[ "$install_cli" == true ]]; then
-        echo ""
-        install_nacos_cli
+    # Install nacos-cli (bundled by default)
+    echo ""
+    if ! install_nacos_cli; then
+        print_warn "nacos-cli installation failed, but nacos-setup is ready"
     fi
 
-    # Always offer to install Nacos Server (unless --cli only)
+    # Print usage info after all installations
+    print_usage_info
+
+    # Always offer to install Nacos Server
     echo ""
     # Use server version from versions file or fallback
     detected_default_version="${NACOS_SERVER_VERSION:-$FALLBACK_NACOS_SERVER_VERSION}"
 
-    read -p "Do you want to install Nacos $detected_default_version now? (Y/n): " -r REPLY
+    REPLY=""
+    read -r -p "Do you want to install Nacos $detected_default_version now? (Y/n): " REPLY || REPLY=y
     echo ""
     if [[ "$REPLY" =~ ^[Yy]?$ ]] || [[ -z "$REPLY" ]]; then
         print_info "Installing Nacos $detected_default_version..."

@@ -14,11 +14,16 @@ function Download-File($url, $output) {
     $headers = @{
         "Referer" = $Global:RefererUrl
     }
-    
-    if ($PSVersionTable.PSVersion.Major -lt 6) {
-        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers
-    } else {
-        Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers
+    $prevProgress = $ProgressPreference
+    $ProgressPreference = "SilentlyContinue"
+    try {
+        if ($PSVersionTable.PSVersion.Major -lt 6) {
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers
+        } else {
+            Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers
+        }
+    } finally {
+        $ProgressPreference = $prevProgress
     }
 }
 
@@ -35,25 +40,29 @@ function Download-Nacos($version) {
 
     $cachedItem = Get-Item -Path $cached -ErrorAction SilentlyContinue
     if ($cachedItem -and $cachedItem.Length -gt 0) {
-        Write-Info "Found cached package: $cached"
+        Write-Detail "Found cached package: $cached"
         try {
             $f = Get-Item $cached
             $mb = [math]::Round($f.Length / 1MB, 2)
-            Write-Info "Package size: $mb MB"
+            Write-Detail "Package size: $mb MB"
         } catch {}
+        if (Test-NacosSetupVerbose) {
+            Write-Detail "Skipping download, using cached file"
+        }
         return $cached
     }
 
-    Write-Info "Downloading Nacos version: $version"
-    Write-Info "From: $downloadUrl"
-    Write-Info "To: $cached"
+    Write-Detail "Downloading Nacos version: $version"
+    Write-Detail "Download URL: $downloadUrl"
+    Write-Detail "Saving to: $cached"
     Download-File $downloadUrl $cached
+    Write-Detail "Download completed: $zipName"
     return $cached
 }
 
 function Extract-NacosToTemp($zipFile) {
     if (-not (Test-Path $zipFile)) { throw "Zip file not found: $zipFile" }
-    Write-Info "Extracting package..."
+    Write-Detail "Extracting Nacos package..."
     $tmpDir = Join-Path $env:TEMP ("nacos-extract-" + [Guid]::NewGuid().ToString())
     Ensure-Directory $tmpDir
     Expand-Archive -Path $zipFile -DestinationPath $tmpDir -Force
@@ -64,17 +73,19 @@ function Extract-NacosToTemp($zipFile) {
 
 function Install-Nacos($sourceDir, $targetDir) {
     if (-not (Test-Path $sourceDir)) { throw "Source directory not found: $sourceDir" }
-    Write-Info "Installing Nacos to: $targetDir"
+    Write-Detail "Installing Nacos to: $targetDir"
     if (Test-Path $targetDir) { 
-        Write-Warn "Removing old version..."
-        Remove-Item -Recurse -Force $targetDir 
+        Write-Detail "Removing old installation: $targetDir"
+        if (-not (Remove-DirectoryRobust $targetDir)) {
+            throw "Could not remove existing target directory: $targetDir"
+        }
     }
     Ensure-Directory (Split-Path $targetDir -Parent)
     Move-Item -Path $sourceDir -Destination $targetDir
     if (-not (Test-Path (Join-Path $targetDir "conf\application.properties"))) {
         throw "Installation verification failed: missing configuration"
     }
-    Write-Success "Installation successful"
+    Write-Detail "Installation completed: $targetDir"
     return $true
 }
 

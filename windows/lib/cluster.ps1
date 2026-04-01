@@ -23,6 +23,8 @@ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$scriptPath\java_manager.ps1"
 . "$scriptPath\process_manager.ps1"
 . "$scriptPath\data_import.ps1"
+$_ssLib = Join-Path $scriptPath "skill_scanner_install.ps1"
+if (Test-Path $_ssLib) { . $_ssLib }
 
 # ============================================================================
 # Global Variables
@@ -58,7 +60,7 @@ function Invoke-ClusterCleanup {
         
         $stoppedPids = @()
         foreach ($p in $Global:StartedPids) {
-            Write-Info "Terminating node PID: $p"
+            Write-Detail "Terminating node PID: $p"
             try { 
                 Stop-Process -Id $p -Force -ErrorAction SilentlyContinue 
                 $stoppedPids += $p
@@ -70,8 +72,8 @@ function Invoke-ClusterCleanup {
     exit $ExitCode
 }
 
-# Register cleanup trap
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Invoke-ClusterCleanup }
+# Do not register PowerShell.Exiting here: dot-sourced into nacos-setup.ps1; exit in Exiting
+# handlers can flash-close the console. Use nacos-setup.ps1 try/finally for host cleanup.
 
 # ============================================================================
 # Node Startup
@@ -115,7 +117,7 @@ function Start-ClusterNode {
     if (Wait-ForNacosReady $MainPort $ConsolePort $NacosVersion 60) {
         $endTime = Get-Date
         $elapsed = ($endTime - $startTime).TotalSeconds
-        Write-Info "Node $NodeName ready (PID: $nacosPid, $([int]$elapsed)s)"
+        Write-Detail "Node $NodeName ready (PID: $nacosPid, $([int]$elapsed)s)"
         return $nacosPid
     } else {
         Write-ErrorMsg "Node $NodeName startup timeout"
@@ -131,10 +133,19 @@ function Start-ClusterNode {
 # ============================================================================
 
 function New-Cluster {
-    Write-Info "Nacos Cluster Installation"
-    Write-Info "===================================="
-    Write-Host ""
-    
+    $TOTAL_STEPS = 7
+    $verLabel = if ($Global:NacosSetupVersion) { $Global:NacosSetupVersion } else { "dev" }
+    if (Test-NacosSetupVerbose) {
+        Write-Info "Nacos Cluster Installation"
+        Write-Info "===================================="
+        Write-Host ""
+    } else {
+        Write-Host ""
+        Write-Host "Nacos Cluster Setup (v$verLabel)"
+        Write-Host "======================================"
+        Write-Host ""
+    }
+
     $clusterDir = Join-Path $Global:ClusterBaseDir $Global:ClusterId
     $Global:CleanupClusterDir = $clusterDir
     
@@ -155,27 +166,28 @@ function New-Cluster {
     
     Ensure-Directory $clusterDir
     
-    Write-Info "Cluster ID: $($Global:ClusterId)"
-    Write-Info "Nacos version: $($Global:Version)"
-    Write-Info "Replica count: $($Global:ReplicaCount)"
-    Write-Info "Cluster directory: $clusterDir"
-    Write-Host ""
+    Write-Detail "Cluster ID: $($Global:ClusterId)"
+    Write-Detail "Nacos version: $($Global:Version)"
+    Write-Detail "Replica count: $($Global:ReplicaCount)"
+    Write-Detail "Cluster directory: $clusterDir"
+    if (Test-NacosSetupVerbose) { Write-Host "" }
     
-    # Check Java
-    if (-not (Check-JavaRequirements $Global:Version $Global:AdvancedMode)) {
+    # Check Java (bundled JRE 3.x + verify)
+    if (-not (Invoke-JavaGateForNacosInstall $Global:Version $Global:AdvancedMode)) {
         Invoke-ClusterCleanup 1
     }
-    Write-Host ""
+    if (Test-NacosSetupVerbose) { Write-Host "" }
     
     # Download Nacos
     $zipFile = Download-Nacos $Global:Version
     if (-not $zipFile) {
         Invoke-ClusterCleanup 1
     }
-    Write-Host ""
+    if (Test-NacosSetupVerbose) { Write-Host "" }
     
     # Configure cluster security
     Configure-Cluster-Security $clusterDir $Global:AdvancedMode
+    $Global:NacosPassword = $Global:NACOS_PASSWORD
     
     # Check datasource (only if explicitly specified via -db-conf)
     $useDerby = $true
@@ -183,23 +195,22 @@ function New-Cluster {
     if ($env:USE_EXTERNAL_DATASOURCE -eq "true") {
         $datasourceFile = Load-DefaultDatasourceConfig
         if ($datasourceFile) {
-            Write-Info "Using external database"
+            Write-Detail "Using external database"
             $useDerby = $false
         } else {
             Write-ErrorMsg "External datasource specified but configuration not found at: $Global:DefaultDatasourceConfig"
             Write-Host ""
             Write-Info "To create the configuration, run:"
-            Write-Info "  nacos-setup db-conf edit $Global:DefaultDatasourceConfig"
+            Write-Info "  nacos-setup db-conf edit default"
             exit 1
         }
     } else {
-        Write-Info "Using embedded Derby database"
-        Write-Info "Tip: Run 'nacos-setup -db-conf' to use external datasource"
+        Write-Detail "Using embedded Derby database"
     }
-    Write-Host ""
+    if (Test-NacosSetupVerbose) { Write-Host "" }
     
     # Allocate ports for all nodes
-    Write-Info "Allocating ports for $($Global:ReplicaCount) nodes..."
+    Write-Detail "Allocating ports for $($Global:ReplicaCount) nodes..."
     $portResult = Allocate-ClusterPorts $Global:BasePort $Global:ReplicaCount $Global:Version
     
     if (-not $portResult) {
@@ -216,23 +227,23 @@ function New-Cluster {
         $nodeMainPorts += [int]$ports[0]
         $nodeConsolePorts += [int]$ports[1]
     }
-    Write-Host ""
+    if (Test-NacosSetupVerbose) { Write-Host "" }
     
     # Prepare cluster metadata
     $clusterConf = Join-Path $clusterDir "cluster.conf"
     $localIp = Get-LocalIp
-    Write-Info "Local IP: $localIp"
-    Write-Host ""
+    Write-Detail "Local IP: $localIp"
+    if (Test-NacosSetupVerbose) { Write-Host "" }
     
     # Extract and configure all nodes first
-    Write-Info "Setting up cluster nodes..."
-    Write-Host ""
+    Write-Detail "Setting up cluster nodes..."
+    if (Test-NacosSetupVerbose) { Write-Host "" }
     
     for ($i = 0; $i -lt $Global:ReplicaCount; $i++) {
         $nodeName = "$i-v$($Global:Version)"
         $nodeDir = Join-Path $clusterDir $nodeName
         
-        Write-Info "Configuring node $i..."
+        Write-Detail "Configuring node $i..."
         
         $tempDir = Extract-NacosToTemp $zipFile
         if (-not $tempDir) {
@@ -277,14 +288,16 @@ function New-Cluster {
         }
         
         Remove-Item "$configFile.bak" -ErrorAction SilentlyContinue
-        Write-Info "  Importing default agentspec / skill data into $nodeDir\data..."
+        Write-Detail "Importing default agentspec / skill data into $nodeDir\data..."
         Invoke-PostNacosConfigDataImportHook $nodeDir
-        
+
         $nacosMajor = $Global:Version.Split('.')[0]
-        if ($nacosMajor -ge 3) {
-            Write-Info "  ✓ Server: $($nodeMainPorts[$i]) | Console: $($nodeConsolePorts[$i]) | gRPC: $($nodeMainPorts[$i]+1000),$($nodeMainPorts[$i]+1001) | Raft: $($nodeMainPorts[$i]-1000)"
-        } else {
-            Write-Info "  ✓ Server: $($nodeMainPorts[$i]) | gRPC: $($nodeMainPorts[$i]+1000),$($nodeMainPorts[$i]+1001) | Raft: $($nodeMainPorts[$i]-1000)"
+        if (Test-NacosSetupVerbose) {
+            if ($nacosMajor -ge 3) {
+                Write-Info ('  OK Server: {0} | Console: {1} | gRPC: {2},{3} | Raft: {4}' -f $nodeMainPorts[$i], $nodeConsolePorts[$i], ($nodeMainPorts[$i]+1000), ($nodeMainPorts[$i]+1001), ($nodeMainPorts[$i]-1000))
+            } else {
+                Write-Info ('  OK Server: {0} | gRPC: {1},{2} | Raft: {3}' -f $nodeMainPorts[$i], ($nodeMainPorts[$i]+1000), ($nodeMainPorts[$i]+1001), ($nodeMainPorts[$i]-1000))
+            }
         }
     }
     Write-Host ""
@@ -295,13 +308,36 @@ function New-Cluster {
         Add-Content -Path $clusterConf -Value "${localIp}:$($nodeMainPorts[$i])" -Encoding ASCII
     }
     
-    Write-Info "Final cluster configuration:"
-    Get-Content $clusterConf | ForEach-Object { Write-Host "  $_" }
-    Write-Host ""
+    if (Test-NacosSetupVerbose) {
+        Write-Host ""
+        Write-Info "Final cluster configuration:"
+        Get-Content $clusterConf | ForEach-Object { Write-Host "  $_" }
+        Write-Host ""
+    }
+
+    # Skill-scanner (align with bash: after nodes + master cluster.conf; interactive)
+    if (-not (Test-NacosSetupVerbose)) {
+        Write-Host "[5/${TOTAL_STEPS}] Setting up skill-scanner" -ForegroundColor Green
+    }
+    Write-Detail "Post-config: optional Cisco skill-scanner step (Nacos $($Global:Version))..."
+    if (Get-Command Invoke-PostNacosConfigSkillScannerHook -ErrorAction SilentlyContinue) {
+        Invoke-PostNacosConfigSkillScannerHook $Global:Version
+        if (Get-Command Test-ShouldWriteSkillScannerPluginConfig -ErrorAction SilentlyContinue) {
+            if (Test-ShouldWriteSkillScannerPluginConfig $Global:Version) {
+                if (Get-Command Set-SkillScannerProperties -ErrorAction SilentlyContinue) {
+                    for ($si = 0; $si -lt $Global:ReplicaCount; $si++) {
+                        $nodeCfg = Join-Path $clusterDir "$si-v$($Global:Version)\conf\application.properties"
+                        if (Test-Path $nodeCfg) { Set-SkillScannerProperties $nodeCfg }
+                    }
+                }
+            }
+        }
+    }
+    Write-NacosSetupStepOk 5 $TOTAL_STEPS "Setting up skill-scanner"
     
     # Start all nodes
     if ($Global:AutoStart) {
-        Write-Info "Starting cluster nodes (sequential start)..."
+        Write-Detail "Starting cluster nodes (sequential start)..."
         Write-Host ""
         
         for ($i = 0; $i -lt $Global:ReplicaCount; $i++) {
@@ -315,7 +351,7 @@ function New-Cluster {
                 
                 # Update previous nodes' cluster.conf to include new node
                 if ($i -gt 0) {
-                    Write-Info "Updating cluster.conf in previous nodes to include node $i..."
+                    Write-Detail "Updating cluster.conf in previous nodes to include node $i..."
                     for ($j = 0; $j -lt $i; $j++) {
                         $prevNodeDir = Join-Path $clusterDir "$j-v$($Global:Version)"
                         $prevClusterConf = Join-Path $prevNodeDir "conf\cluster.conf"
@@ -329,26 +365,28 @@ function New-Cluster {
         }
         
         Write-Host ""
-        Write-Info "All nodes started successfully!"
+        Write-Detail "All nodes started successfully!"
         
         # Initialize password on first node
         if ($Global:NacosPassword -and $Global:NacosPassword -ne "nacos") {
-            Write-Info "Initializing admin password..."
+            Write-Detail "Initializing admin password..."
             if (Initialize-AdminPassword $nodeMainPorts[0] $nodeConsolePorts[0] $Global:Version $Global:NacosPassword) {
-                Write-Info "Admin password initialized successfully"
-                Write-Host ""
-                Write-Info "Auto-Generated Admin Password:"
-                Write-Host "  $($Global:NacosPassword)"
-                Write-Host ""
+                Write-Detail "Admin password initialized successfully"
             } else {
                 Write-Warn "Password initialization failed (may already be set previously)"
-                # Clear password so it won't be shown in completion info
                 $Global:NacosPassword = $null
             }
         }
         
         # Print cluster info
         Show-ClusterInfo $clusterDir $Global:Version $Global:ReplicaCount $nodeMainPorts $nodeConsolePorts
+
+        $nm = [int]($Global:Version.Split('.')[0])
+        $browserUrl = if ($nm -ge 3) { "http://${localIp}:$($nodeConsolePorts[0])" } else { "http://${localIp}:$($nodeMainPorts[0])/nacos" }
+        if ($Global:NacosPassword -and (Get-Command Copy-PasswordToClipboard -ErrorAction SilentlyContinue)) {
+            if (Copy-PasswordToClipboard $Global:NacosPassword) { Write-Info "Password copied to clipboard!" }
+        }
+        if (Get-Command Open-Browser -ErrorAction SilentlyContinue) { Open-Browser $browserUrl | Out-Null }
         
         # Handle daemon or monitoring
         if ($Global:DaemonMode) {
@@ -447,7 +485,7 @@ function Show-ClusterInfo {
 function Remove-ExistingCluster {
     param([string]$ClusterDir)
     
-    Write-Info "Cleaning existing cluster nodes..."
+    Write-Detail "Cleaning existing cluster nodes..."
     
     $nodeDirs = Get-ChildItem -Path $ClusterDir -Directory -Filter "*-v*" -ErrorAction SilentlyContinue
     
@@ -457,7 +495,7 @@ function Remove-ExistingCluster {
     foreach ($nodeDir in $nodeDirs) {
         $processes = Get-Process java -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*$($nodeDir.FullName)*" }
         foreach ($proc in $processes) {
-            Write-Info "Stopping $($nodeDir.Name) (PID: $($proc.Id))"
+            Write-Detail "Stopping $($nodeDir.Name) (PID: $($proc.Id))"
             $proc | Stop-Process -Force -ErrorAction SilentlyContinue
         }
     }
@@ -472,7 +510,7 @@ function Remove-ExistingCluster {
     Remove-Item -Path (Join-Path $ClusterDir "cluster.conf") -ErrorAction SilentlyContinue
     Remove-Item -Path (Join-Path $ClusterDir "share.properties") -ErrorAction SilentlyContinue
     
-    Write-Info "Cleaned $($nodeDirs.Count) nodes"
+    Write-Detail "Cleaned $($nodeDirs.Count) nodes"
     Write-Host ""
 }
 
@@ -481,9 +519,17 @@ function Remove-ExistingCluster {
 # ============================================================================
 
 function Join-ClusterMode {
-    Write-Info "Join Cluster Mode"
-    Write-Info "===================================="
-    Write-Host ""
+    $verLabel = if ($Global:NacosSetupVersion) { $Global:NacosSetupVersion } else { "dev" }
+    if (Test-NacosSetupVerbose) {
+        Write-Info "Join Cluster Mode"
+        Write-Info "===================================="
+        Write-Host ""
+    } else {
+        Write-Host ""
+        Write-Host "Nacos Cluster Join (v$verLabel)"
+        Write-Host "======================================"
+        Write-Host ""
+    }
     
     $clusterDir = Join-Path $Global:ClusterBaseDir $Global:ClusterId
     
@@ -499,7 +545,7 @@ function Join-ClusterMode {
         Invoke-ClusterCleanup 1
     }
     
-    Write-Info "Existing nodes: $($existingNodes.Count)"
+    Write-Detail "Existing nodes: $($existingNodes.Count)"
     
     # Determine next node index
     $maxIndex = -1
@@ -511,11 +557,11 @@ function Join-ClusterMode {
     $newIndex = $maxIndex + 1
     $newNodeName = "$newIndex-v$($Global:Version)"
     
-    Write-Info "New node: $newNodeName"
+    Write-Detail "New node: $newNodeName"
     Write-Host ""
     
-    # Check Java
-    if (-not (Check-JavaRequirements $Global:Version $Global:AdvancedMode)) {
+    # Check Java (bundled JRE 3.x + verify)
+    if (-not (Invoke-JavaGateForNacosInstall $Global:Version $Global:AdvancedMode)) {
         Invoke-ClusterCleanup 1
     }
     
@@ -581,7 +627,7 @@ function Join-ClusterMode {
         $newConsolePort = Find-AvailablePort $newConsolePort
     }
     
-    Write-Info "Ports: main=$newMainPort, console=$newConsolePort"
+    Write-Detail "Ports: main=$newMainPort, console=$newConsolePort"
     Write-Host ""
     
     # Update cluster.conf
@@ -616,15 +662,23 @@ function Join-ClusterMode {
     }
     
     Remove-Item "$configFile.bak" -ErrorAction SilentlyContinue
-    Write-Info "Node configured: main=$newMainPort, console=$newConsolePort"
+    Write-Detail "Node configured: main=$newMainPort, console=$newConsolePort"
     Write-Host ""
 
-    Write-Info "Post-config: importing default agentspec / skill data into $newNodeDir\data..."
+    Write-Detail "Post-config: importing default agentspec / skill data into $newNodeDir\data..."
     Invoke-PostNacosConfigDataImportHook $newNodeDir
     Write-Host ""
-    
+
+    if (Get-Command Test-ShouldWriteSkillScannerPluginConfig -ErrorAction SilentlyContinue) {
+        if (Test-ShouldWriteSkillScannerPluginConfig $Global:Version) {
+            if (Get-Command Set-SkillScannerProperties -ErrorAction SilentlyContinue) {
+                Set-SkillScannerProperties (Join-Path $newNodeDir "conf\application.properties")
+            }
+        }
+    }
+
     # Update cluster.conf in existing nodes
-    Write-Info "Updating cluster.conf in existing nodes..."
+    Write-Detail "Updating cluster.conf in existing nodes..."
     foreach ($existingNode in $existingNodes) {
         Copy-Item (Join-Path $clusterDir "cluster.conf") (Join-Path $clusterDir $existingNode.Name "conf\cluster.conf")
     }
@@ -635,7 +689,7 @@ function Join-ClusterMode {
         $nacosPid = Start-ClusterNode $newNodeDir $newNodeName $newMainPort $newConsolePort $Global:Version $useDerby
         
         if ($nacosPid) {
-            Write-Info "Node joined successfully!"
+            Write-Detail "Node joined successfully!"
             
             if ($Global:DaemonMode) {
                 Write-Info "Daemon mode: Script will exit"
@@ -659,9 +713,11 @@ function Join-ClusterMode {
 # ============================================================================
 
 function Leave-ClusterMode {
-    Write-Info "Leave Cluster Mode"
-    Write-Info "===================================="
-    Write-Host ""
+    if (Test-NacosSetupVerbose) {
+        Write-Info "Leave Cluster Mode"
+        Write-Info "===================================="
+        Write-Host ""
+    }
     
     $clusterDir = Join-Path $Global:ClusterBaseDir $Global:ClusterId
     

@@ -11,14 +11,98 @@ function Find-NacosProcessPid($installDir) {
     return $null
 }
 
+# Align with lib/process_manager.sh stop_nacos_gracefully: graceful stop, wait, then force kill tree.
+function Stop-NacosGracefully {
+    param(
+        [Parameter(Mandatory = $false, Position = 0)]
+        $ProcessId,
+        [int]$TimeoutSeconds = 10
+    )
+
+    if ($null -eq $ProcessId) { return $true }
+
+    $targetPid = $null
+    try {
+        if ($ProcessId -is [array]) {
+            $ProcessId = $ProcessId | Select-Object -Last 1
+        }
+        $targetPid = [int]$ProcessId
+    } catch {
+        return $true
+    }
+
+    if ($targetPid -le 0) { return $true }
+
+    if (-not (Get-Process -Id $targetPid -ErrorAction SilentlyContinue)) {
+        return $true
+    }
+
+    try {
+        Stop-Process -Id $targetPid -ErrorAction SilentlyContinue
+    } catch {}
+
+    $elapsed = 0
+    while ($elapsed -lt $TimeoutSeconds) {
+        if (-not (Get-Process -Id $targetPid -ErrorAction SilentlyContinue)) {
+            return $true
+        }
+        Start-Sleep -Seconds 1
+        $elapsed++
+    }
+
+    try { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue } catch {}
+    try { cmd /c "taskkill /F /PID $targetPid /T >nul 2>&1" } catch {}
+    Start-Sleep -Seconds 1
+
+    return -not (Get-Process -Id $targetPid -ErrorAction SilentlyContinue)
+}
+
 function Get-BlockingProcesses($targetDir) {
     try {
         $escapedPath = [Regex]::Escape($targetDir)
+        $escapedFwd = [Regex]::Escape($targetDir.Replace('\', '/'))
         return Get-CimInstance Win32_Process | Where-Object { 
-            ($_.CommandLine -and $_.CommandLine -match $escapedPath) -or
+            ($_.CommandLine -and ($_.CommandLine -match $escapedPath -or $_.CommandLine -match $escapedFwd)) -or
             ($_.ExecutablePath -and $_.ExecutablePath -match $escapedPath)
         }
     } catch { return @() }
+}
+
+# Stop any process whose command line or executable lives under the install dir (e.g. leftover Java after closing the console).
+# Uses taskkill /T so child JVM/cmd trees are torn down together.
+function Stop-ProcessesUsingInstallDir {
+    param([Parameter(Mandatory = $true)][string]$InstallDir)
+    if (-not (Test-Path -LiteralPath $InstallDir)) { return }
+
+    $fullPath = (Get-Item -LiteralPath $InstallDir).FullName
+    $escaped = [Regex]::Escape($fullPath)
+    $escapedFwd = [Regex]::Escape($fullPath.Replace('\', '/'))
+
+    $toKill = @()
+    try {
+        $toKill = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            if ($_.ExecutablePath -and ($_.ExecutablePath -match $escaped -or $_.ExecutablePath -match $escapedFwd)) { return $true }
+            if (-not $_.CommandLine) { return $false }
+            if ($_.CommandLine -match $escaped -or $_.CommandLine -match $escapedFwd) { return $true }
+            return $false
+        })
+    } catch {}
+
+    $seen = @{}
+    foreach ($p in $toKill) {
+        if ($seen.ContainsKey([int]$p.ProcessId)) { continue }
+        $seen[[int]$p.ProcessId] = $true
+        try { cmd /c "taskkill /F /PID $($p.ProcessId) /T >nul 2>&1" } catch {}
+    }
+
+    if (Get-Command Find-NacosProcessPid -ErrorAction SilentlyContinue) {
+        $np = Find-NacosProcessPid $fullPath
+        if ($np) {
+            try { cmd /c "taskkill /F /PID $np /T >nul 2>&1" } catch {}
+        }
+    }
+
+    Start-Sleep -Seconds 2
 }
 
 
@@ -58,24 +142,30 @@ function Wait-ForNacosReady($mainPort, $consolePort, $version, $maxWait) {
     if (-not $maxWait) { $maxWait = 60 }
     $major = [int]($version.Split('.')[0])
     $healthUrl = if ($major -ge 3) { "http://localhost:$consolePort/v3/console/health/readiness" } else { "http://localhost:$mainPort/nacos/v2/console/health/readiness" }
-    
-    Write-Host -NoNewline "[INFO] Waiting for Nacos to be ready..."
-    for ($i=0; $i -lt $maxWait; $i++) {
+
+    $verboseWait = $false
+    if (Get-Command Test-NacosSetupVerbose -ErrorAction SilentlyContinue) { $verboseWait = Test-NacosSetupVerbose }
+
+    # Align with bash wait_for_nacos_ready: progress line only when VERBOSE
+    if ($verboseWait) {
+        Write-Host -NoNewline "[INFO] Waiting for Nacos to be ready..."
+    }
+    for ($i = 0; $i -lt $maxWait; $i++) {
         try {
             if ($PSVersionTable.PSVersion.Major -lt 6) {
                 $r = Invoke-WebRequest -UseBasicParsing -Uri $healthUrl -Method Get -TimeoutSec 5
             } else {
                 $r = Invoke-WebRequest -Uri $healthUrl -Method Get -TimeoutSec 5
             }
-            if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300) { 
-                Write-Host " Done." -ForegroundColor Green
-                return $true 
+            if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300) {
+                if ($verboseWait) { Write-Host " Done." -ForegroundColor Green }
+                return $true
             }
         } catch {}
-        Write-Host -NoNewline "."
+        if ($verboseWait) { Write-Host -NoNewline "." }
         Start-Sleep -Seconds 1
     }
-    Write-Host " Timeout!" -ForegroundColor Red
+    if ($verboseWait) { Write-Host " Timeout!" -ForegroundColor Red }
     return $false
 }
 
@@ -95,21 +185,28 @@ function Initialize-AdminPassword($mainPort, $consolePort, $version, $password) 
 }
 
 function Print-CompletionInfo($installDir, $consoleUrl, $serverPort, $consolePort, $version, $username, $password) {
+    $nacosMajor = [int]($version.Split('.')[0])
+    $verbose = $false
+    if (Get-Command Test-NacosSetupVerbose -ErrorAction SilentlyContinue) { $verbose = Test-NacosSetupVerbose }
+
     Write-Host ""
     Write-Host "========================================"
     Write-Info "Nacos Started Successfully!"
     Write-Host "========================================"
     Write-Host ""
-    Write-Host "Installation Directory: $installDir"
-    Write-Host "Console URL: $consoleUrl"
+    Write-Host "  Console URL: $consoleUrl"
     Write-Host ""
-    Write-Info "Port allocation:"
-    Write-Host "  - Server Port: $serverPort"
-    Write-Host "  - Client gRPC Port: $($serverPort + 1000)"
-    Write-Host "  - Server gRPC Port: $($serverPort + 1001)"
-    Write-Host "  - Raft Port: $($serverPort - 1000)"
-    if ([int]($version.Split('.')[0]) -ge 3) { Write-Host "  - Console Port: $consolePort" }
-    Write-Host ""
+    if ($verbose) {
+        Write-Host "  Installation: $installDir"
+        Write-Host ""
+        Write-Info "Port allocation:"
+        Write-Host "  - Server Port: $serverPort"
+        Write-Host "  - Client gRPC Port: $($serverPort + 1000)"
+        Write-Host "  - Server gRPC Port: $($serverPort + 1001)"
+        Write-Host "  - Raft Port: $($serverPort - 1000)"
+        if ($nacosMajor -ge 3) { Write-Host "  - Console Port: $consolePort" }
+        Write-Host ""
+    }
     if ($password -and $password -ne "nacos") {
         Write-Host "Authentication is enabled. Please login with:"
         Write-Host "  Username: $username"

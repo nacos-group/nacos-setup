@@ -48,15 +48,17 @@ cd nacos-setup
 sudo bash nacos-installer.sh
 ```
 
+在 **Windows** 上不要使用上述 Bash 安装器或 `nacos-setup.sh`：仓库里的 Bash 流程仅支持 Linux / macOS。请使用 `windows/nacos-installer.ps1`（或与线上一键安装相同的 PowerShell 命令），由 PowerShell 版 `nacos-setup.ps1` 管理实例。
+
 ### 验证安装
 
 ```bash
 nacos-setup --help
 ```
 
-### 可选：安装 nacos-cli
+### 关于 nacos-cli
 
-nacos-cli 是独立的 Nacos 命令行管理工具，默认不会安装。如需使用，可以单独安装：
+nacos-cli 是独立的 Nacos 命令行管理工具，**默认随 installer 一起安装**。如需单独安装 nacos-cli（不安装 nacos-setup），可使用 `--cli` 参数：
 
 #### Linux / macOS
 

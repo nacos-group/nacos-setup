@@ -2,6 +2,8 @@
 # Native PowerShell implementation (no WSL required)
 
 $ErrorActionPreference = "Stop"
+# PS 5.1: default progress UI throttles Invoke-WebRequest to ~KB/s on large files; disable for downloads.
+$ProgressPreference    = "SilentlyContinue"
 
 # =============================
 # Helper functions (define before loading scripts)
@@ -97,6 +99,10 @@ $libFiles = @(
     "cluster.ps1"
 )
 
+$optionalLibFiles = @(
+    "skill_scanner_install.ps1"
+)
+
 foreach ($libFile in $libFiles) {
     $libFilePath = Join-Path $libPath $libFile
     if (Test-Path $libFilePath) {
@@ -107,15 +113,14 @@ foreach ($libFile in $libFiles) {
     }
 }
 
+foreach ($libFile in $optionalLibFiles) {
+    $libFilePath = Join-Path $libPath $libFile
+    if (Test-Path $libFilePath) { . $libFilePath }
+}
+
 # =============================
 # Main
 # =============================
-
-Write-Host ""
-Write-Host "========================================"
-Write-Host "  Nacos Setup (Windows Native)"
-Write-Host "========================================"
-Write-Host ""
 
 function Print-SystemInfo {
     Write-Info "System Information:"
@@ -125,8 +130,6 @@ function Print-SystemInfo {
     Write-Info "  - Nacos Setup Version: $NacosSetupVersion"
     Write-Host ""
 }
-
-Print-SystemInfo
 
 # =============================
 # Load Version Management
@@ -150,6 +153,8 @@ function Initialize-Version {
     if ($fetchedVersion) {
         $script:DefaultVersion = $fetchedVersion
         $script:Version = $fetchedVersion
+        $Global:Version = $fetchedVersion
+        Write-Detail "Using latest Nacos server version: $fetchedVersion"
     }
 }
 
@@ -189,6 +194,8 @@ $NodeIndex = ""
 $DatasourceConfMode = $false
 $Global:StartedPids = @()
 $Global:CleanupDone = $false
+$Global:DbConfMode = $null
+$Global:NacosSetupVersion = $NacosSetupVersion
 
 # Initialize globals with defaults (Parse-Arguments will override)
 $Global:Mode = $Mode
@@ -208,19 +215,26 @@ $Global:JoinMode = $JoinMode
 $Global:LeaveMode = $LeaveMode
 $Global:NodeIndex = $NodeIndex
 $Global:DatasourceConfMode = $DatasourceConfMode
+$Global:DefaultInstallDir = $DefaultInstallDir
 
 function Global:Invoke-NacosSetupCleanup {
     if ($Global:CleanupDone) { return }
     $Global:CleanupDone = $true
     
-    if (-not $Global:DaemonMode -and $Global:StartedPids.Count -gt 0) {
+    if ($Global:DaemonMode) { return }
+
+    $pidsToStop = @()
+    foreach ($p in @($Global:StartedPids)) { if ($p) { $pidsToStop += $p } }
+    if ($Global:StartedNacosPid -and $pidsToStop -notcontains $Global:StartedNacosPid) {
+        $pidsToStop += $Global:StartedNacosPid
+    }
+
+    if ($pidsToStop.Count -gt 0) {
         Write-Host ""
         Write-Info "Stopping Nacos processes..."
-        foreach ($p in $Global:StartedPids) {
+        foreach ($p in $pidsToStop) {
             Write-Info "Terminating process PID: $p"
-            # Try native PowerShell stop
             try { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue } catch {}
-            # Fallback/Ensure with taskkill (forcefully terminates the process and any child processes)
             try { cmd /c "taskkill /F /PID $p /T >NUL 2>&1" } catch {}
         }
     }
@@ -246,6 +260,7 @@ function Print-Usage {
     Write-Host "  -db-conf [NAME]          Use external datasource (default: default)"
     Write-Host "  db-conf edit [NAME]      Edit datasource configuration"
     Write-Host "  db-conf show [NAME]      Show datasource configuration"
+    Write-Host "  -x, --verbose            Verbose output (detailed logs; or env NACOS_SETUP_VERBOSE=1)"
     Write-Host "  -h, --help               Show this help message"
     Write-Host ""
     Write-Host "Cluster Options:"
@@ -259,6 +274,16 @@ function Print-Usage {
     Write-Host "  nacos-setup -p 8848 --daemon"
     Write-Host "  nacos-setup -c mycluster -n 3"
     Write-Host ""
+}
+
+function Print-NacosInstallerResolutionLog {
+    $localInstaller = Join-Path $PSScriptRoot "nacos-installer.ps1"
+    if (Test-Path $localInstaller) {
+        Write-Info "nacos-installer: using local: $localInstaller"
+    } else {
+        Write-Info "nacos-installer: local nacos-installer.ps1 not found under $PSScriptRoot"
+        Write-Info "nacos-installer: use: iwr -UseBasicParsing https://nacos.io/nacos-installer.ps1 | iex"
+    }
 }
 
 function Parse-Arguments($argv) {
@@ -319,6 +344,8 @@ function Parse-Arguments($argv) {
             "--join" { $Global:JoinMode = $true; $i++ }
             "--no-start" { $Global:AutoStart = $false; $i++ }
             "--kill" { $Global:AllowKill = $true; $i++ }
+            "-x" { $Global:NacosSetupVerbose = $true; $env:NACOS_SETUP_VERBOSE = "true"; $i++ }
+            "--verbose" { $Global:NacosSetupVerbose = $true; $env:NACOS_SETUP_VERBOSE = "true"; $i++ }
             default { $argsList += $arg; $i++ }
         }
     }
@@ -394,298 +421,14 @@ function Validate-Arguments {
     }
 }
 
-function Get-NodeMainPort($nodeDir, $version) {
-    $configFile = Join-Path $nodeDir "conf\application.properties"
-    if (-not (Test-Path $configFile)) { return $null }
-    $major = [int]($version.Split('.')[0])
-    $key = if ($major -ge 3) { "nacos.server.main.port" } else { "server.port" }
-    $line = Get-Content -Path $configFile | Where-Object { $_ -match "^$key=" } | Select-Object -First 1
-    if ($line -and $line -match "^$key=(.*)$") { return [int]$Matches[1] }
-    return $null
-}
-
-function Get-NodeConsolePort($nodeDir) {
-    $configFile = Join-Path $nodeDir "conf\application.properties"
-    if (-not (Test-Path $configFile)) { return $null }
-    $line = Get-Content -Path $configFile | Where-Object { $_ -match "^nacos.console.port=" } | Select-Object -First 1
-    if ($line -and $line -match "^nacos.console.port=(.*)$") { return [int]$Matches[1] }
-    return $null
-}
-
-function Run-Standalone {
-    Write-Info "Nacos Standalone Installation"
-    if (-not $Global:InstallDir) {
-        $Global:InstallDir = Join-Path $DefaultInstallDir "standalone\nacos-$Global:Version"
-    }
-    Write-Info "Target Nacos version: $Global:Version"
-    Write-Info "Installation directory: $Global:InstallDir"
-
-    # Remove existing installation if it exists (fresh install)
-    if (Test-Path $Global:InstallDir) {
-        Write-Warn "Removing existing installation at $Global:InstallDir"
-        
-        $lockingProcs = Get-BlockingProcesses $Global:InstallDir
-        if ($lockingProcs) {
-            Write-Warn "Found processes running from or using this directory:"
-            foreach ($p in $lockingProcs) {
-                Write-Warn "  PID: $($p.ProcessId) - $($p.Name)"
-            }
-
-            if ($Global:AllowKill) {
-                Write-Info "Kill mode is enabled. Stopping processes..."
-                foreach ($p in $lockingProcs) {
-                    try { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
-                }
-                Start-Sleep -Seconds 2
-            } else {
-                Write-ErrorMsg "Directory is in use. Use --kill to force remove, or stop processes manually."
-                exit 1
-            }
-        }
-
-        try {
-            Remove-Item -Recurse -Force $Global:InstallDir -ErrorAction Stop
-        } catch {
-            Write-ErrorMsg "Failed to remove directory. One or more files may still be in use."
-            Write-ErrorMsg $_.Exception.Message
-            exit 1
-        }
-    }
-
-    if (-not (Check-JavaRequirements $Global:Version $Global:AdvancedMode)) { exit 1 }
-
-    $zip = Download-Nacos $Global:Version
-    $extracted = Extract-NacosToTemp $zip
-    Install-Nacos $extracted $Global:InstallDir | Out-Null
-    Cleanup-TempDir (Split-Path $extracted -Parent)
-
-    $ports = Allocate-StandalonePorts $Global:Port $Global:Version $Global:AdvancedMode $Global:AllowKill
-    $serverPort = $ports[0]
-    $consolePort = $ports[1]
-
-    $configFile = Join-Path $Global:InstallDir "conf\application.properties"
-    Write-Info "Configuring ports in: $configFile"
-    Update-PortConfig $configFile $serverPort $consolePort $Global:Version
-    Configure-Standalone-Security $configFile $Global:AdvancedMode
-
-    $ds = Load-GlobalDatasourceConfig
-    if ($ds) { 
-        Apply-DatasourceConfig $configFile $ds | Out-Null 
-        Write-Info "External database configured"
-    } else {
-        Write-Info "Using embedded Derby database"
-        Write-Info "Tip: Run 'nacos-setup --datasource-conf' to configure external database"
-    }
-    Write-Info "Configuration completed"
-    Write-Host ""
-
-    if ($Global:AutoStart) {
-        Write-Info "Starting Nacos in standalone mode..."
-        Write-Host ""
-        
-        $startTime = Get-Date
-        $nacosPid = Start-NacosProcess $Global:InstallDir "standalone" $false
-        if ($nacosPid -is [array]) {
-            Write-Info "Nacos started (Wrapper PID: $($nacosPid[0]), Java PID: $($nacosPid[1]))"
-            $Global:StartedPids += $nacosPid[1]
-        } else {
-            Write-Info "Nacos started with PID: $nacosPid"
-            $Global:StartedPids += $nacosPid
-        }
-        Write-Host ""
-        if (Wait-ForNacosReady $serverPort $consolePort $Global:Version 60) {
-            $endTime = Get-Date
-            $elapsed = [int](($endTime - $startTime).TotalSeconds)
-            Write-Info "Nacos is ready in ${elapsed}s!"
-            Write-Host ""
-            
-            if ($Global:NACOS_PASSWORD -and $Global:NACOS_PASSWORD -ne "nacos") {
-                Write-Info "Initializing admin password..."
-                if (Initialize-AdminPassword $serverPort $consolePort $Global:Version $Global:NACOS_PASSWORD) {
-                    Write-Info "Admin password initialized successfully"
-                } else {
-                    Write-Warn "Password initialization failed (may already be set previously)"
-                    # Clear password so it won't be shown in completion info
-                    $Global:NACOS_PASSWORD = $null
-                }
-            }
-        } else {
-            Write-Warn "Nacos may still be starting, please wait a moment"
-        }
-        $major = [int]($Global:Version.Split('.')[0])
-        $consoleUrl = if ($major -ge 3) { "http://localhost:$consolePort" } else { "http://localhost:$serverPort/nacos" }
-        Print-CompletionInfo $Global:InstallDir $consoleUrl $serverPort $consolePort $Global:Version "nacos" $Global:NACOS_PASSWORD
-
-        if ($Global:NACOS_PASSWORD -and (Copy-PasswordToClipboard $Global:NACOS_PASSWORD)) { 
-            Write-Info "✓ Password copied to clipboard!" 
-        }
-        Open-Browser $consoleUrl | Out-Null
-
-        if (-not $Global:DaemonMode -and $nacosPid) {
-            Write-Info "Press Ctrl+C to stop Nacos"
-            try { Wait-Process -Id $nacosPid } catch {}
-        }
-    }
-}
-
-function Run-Cluster {
-    # If JoinMode or LeaveMode, delegate to cluster.ps1
-    if ($Global:JoinMode -or $Global:LeaveMode) {
-        Invoke-ClusterMode
-        return
-    }
-    
-    Write-Info "Nacos Cluster Installation"
-    $clusterDir = Join-Path $ClusterBaseDir $Global:ClusterId
-    if (Test-Path $clusterDir) {
-        $shouldRemove = $false
-        if ($Global:CleanMode) {
-            Write-Warn "Cleaning existing cluster..."
-            $shouldRemove = $true
-        } else {
-            Write-Warn "Removing existing cluster at $clusterDir"
-            $shouldRemove = $true
-        }
-
-        if ($shouldRemove) {
-            $lockingProcs = Get-BlockingProcesses $clusterDir
-            if ($lockingProcs) {
-                Write-Warn "Found processes running from or using this directory:"
-                foreach ($p in $lockingProcs) {
-                    Write-Warn "  PID: $($p.ProcessId) - $($p.Name)"
-                }
-
-                if ($Global:AllowKill) {
-                    Write-Info "Kill mode is enabled. Stopping processes..."
-                    foreach ($p in $lockingProcs) {
-                        try { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
-                    }
-                    Start-Sleep -Seconds 2
-                } else {
-                    Write-ErrorMsg "Directory is in use. Use --kill to force remove, or stop processes manually."
-                    exit 1
-                }
-            }
-            try {
-                Remove-Item -Recurse -Force $clusterDir -ErrorAction Stop
-            } catch {
-                Write-ErrorMsg "Failed to remove directory: $_"
-                exit 1
-            }
-        }
-    }
-    Ensure-Directory $clusterDir
-
-    if (-not (Check-JavaRequirements $Global:Version $Global:AdvancedMode)) { exit 1 }
-
-    $zip = Download-Nacos $Global:Version
-    Configure-Cluster-Security $clusterDir $Global:AdvancedMode
-
-    $ds = Load-GlobalDatasourceConfig
-    $useDerby = -not $ds
-
-    $nodeMain = @()
-    $nodeConsole = @()
-
-    $ports = Allocate-ClusterPorts $Global:BasePort $Global:ReplicaCount $Global:Version
-    foreach ($pair in $ports) {
-        $parts = $pair.Split(':')
-        $nodeMain += [int]$parts[0]
-        $nodeConsole += [int]$parts[1]
-    }
-
-    $localIp = Get-LocalIp
-    for ($i=0; $i -lt $Global:ReplicaCount; $i++) {
-        $nodeName = "$i-v$($Global:Version)"
-        $nodeDir = Join-Path $clusterDir $nodeName
-
-        if (-not (Test-Path $nodeDir)) {
-            $tempDir = Extract-NacosToTemp $zip
-            Install-Nacos $tempDir $nodeDir | Out-Null
-            Cleanup-TempDir (Split-Path $tempDir -Parent)
-        }
-
-        $nodeClusterConf = Join-Path $nodeDir "conf\cluster.conf"
-        @() | Set-Content -Path $nodeClusterConf -Encoding UTF8
-        for ($j=0; $j -le $i; $j++) {
-            $port = $nodeMain[$j]
-            Add-Content -Path $nodeClusterConf -Value "${localIp}:$port"
-        }
-
-        $configFile = Join-Path $nodeDir "conf\application.properties"
-        Update-PortConfig $configFile $nodeMain[$i] $nodeConsole[$i] $Global:Version
-        Apply-SecurityConfig $configFile $Global:TOKEN_SECRET $Global:IDENTITY_KEY $Global:IDENTITY_VALUE
-        if ($ds) { Apply-DatasourceConfig $configFile $ds | Out-Null } elseif ($useDerby) { Configure-Derby-For-Cluster $configFile }
-    }
-
-    if ($Global:AutoStart) {
-        Write-Info "Starting cluster nodes (sequential start)..."
-        Write-Host ""
-        
-        $pids = @()
-        for ($i=0; $i -lt $Global:ReplicaCount; $i++) {
-            $nodeDir = Join-Path $clusterDir "$i-v$($Global:Version)"
-            $nacosPid = Start-NacosProcess $nodeDir "cluster" $useDerby
-            if ($nacosPid) {
-                if ($nacosPid -is [array]) {
-                    Write-Info "Node $i started (Wrapper PID: $($nacosPid[0]), Java PID: $($nacosPid[1]))"
-                    $pids += $nacosPid[1]
-                    $Global:StartedPids += $nacosPid[1]
-                } else {
-                    Write-Info "Node $i started (PID: $nacosPid)"
-                    $pids += $nacosPid
-                    $Global:StartedPids += $nacosPid
-                }
-            }
-
-            if (Wait-ForNacosReady $nodeMain[$i] $nodeConsole[$i] $Global:Version 60) {
-                Write-Info "Node $i ready"
-            }
-
-            if ($i -gt 0) {
-                Write-Info "Updating cluster.conf in previous nodes to include node $i..."
-                for ($j=0; $j -lt $i; $j++) {
-                    $prevConf = Join-Path $clusterDir "$j-v$($Global:Version)\conf\cluster.conf"
-                    if (Test-Path $prevConf) {
-                        $port = $nodeMain[$i]
-                        Add-Content -Path $prevConf -Value "${localIp}:$port"
-                    }
-                }
-            }
-        }
-
-        Write-Host ""
-        Write-Info "All nodes started successfully!"
-        
-        if ($Global:NACOS_PASSWORD -and $Global:NACOS_PASSWORD -ne "nacos") {
-            Write-Info "Initializing admin password..."
-            if (Initialize-AdminPassword $nodeMain[0] $nodeConsole[0] $Global:Version $Global:NACOS_PASSWORD) {
-                Write-Info "Admin password initialized successfully"
-            } else {
-                Write-Warn "Password initialization failed (may already be set previously)"
-                # Clear password so it won't be shown in completion info
-                $Global:NACOS_PASSWORD = $null
-            }
-        }
-
-        $consoleUrl = Print-ClusterCompletionInfo $clusterDir $Global:ClusterId $nodeMain $nodeConsole $Global:Version "nacos" $Global:NACOS_PASSWORD $Global:TOKEN_SECRET $Global:IDENTITY_KEY $Global:IDENTITY_VALUE
-        
-        if ($Global:NACOS_PASSWORD -and (Copy-PasswordToClipboard $Global:NACOS_PASSWORD)) { 
-            Write-Info "✓ Password copied to clipboard!" 
-        }
-        Open-Browser $consoleUrl | Out-Null
-
-        if (-not $Global:DaemonMode -and $pids.Count -gt 0) {
-            Write-Info "Press Ctrl+C to stop cluster"
-            foreach ($p in $pids) {
-                try { Wait-Process -Id $p } catch {}
-            }
-        }
-    }
-}
-
 try {
     Parse-Arguments $args
+
+    if (Test-NacosSetupVerbose) {
+        Print-NacosInstallerResolutionLog
+        Write-Host ""
+        Print-SystemInfo
+    }
 
     # Handle db-conf mode (local modes that don't need version fetching)
     if ($Global:DbConfMode) {
@@ -714,19 +457,21 @@ try {
 
     # Initialize version (fetch from remote only if user didn't specify -v)
     Initialize-Version
-    Write-Host ""
+    if (Test-NacosSetupVerbose) { Write-Host "" }
 
     # Print external datasource mode info if enabled
     if ($env:USE_EXTERNAL_DATASOURCE -eq "true") {
         $activeDatasourceConfig = if ($env:DEFAULT_DATASOURCE_CONFIG) { $env:DEFAULT_DATASOURCE_CONFIG } else { $Global:DefaultDatasourceConfig }
-        Write-Info "External datasource mode enabled: $activeDatasourceConfig"
+        Write-Detail "External datasource mode enabled: $activeDatasourceConfig"
     }
 
     Validate-Arguments
 
+    if (-not (Test-WindowsNacosSetupPrerequisites)) { exit 1 }
+
     switch ($Global:Mode) {
-        "standalone" { Run-Standalone }
-        "cluster" { Run-Cluster }
+        "standalone" { Invoke-StandaloneMode }
+        "cluster" { Invoke-ClusterMode }
         default { Write-ErrorMsg "Unknown mode: $Global:Mode"; exit 1 }
     }
 } finally {

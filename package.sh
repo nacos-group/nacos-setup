@@ -54,7 +54,7 @@ package_linux() {
     mkdir -p "$tmp_dir/$name"
 
     # Linux files only (exclude installer and Windows files)
-    local include=("nacos-setup.sh" "lib" "README.md" "LICENSE")
+    local include=("nacos-setup.sh" "run-installer.sh" "lib" "README.md" "LICENSE")
 
     for f in "${include[@]}"; do
         if [ -e "$PROJECT_ROOT/$f" ]; then
@@ -76,6 +76,9 @@ package_linux() {
     fi
     if [ -f "$tmp_dir/$name/nacos-setup.sh" ]; then
         chmod +x "$tmp_dir/$name/nacos-setup.sh" 2>/dev/null || true
+    fi
+    if [ -f "$tmp_dir/$name/run-installer.sh" ]; then
+        chmod +x "$tmp_dir/$name/run-installer.sh" 2>/dev/null || true
     fi
     
     pushd "$tmp_dir" >/dev/null

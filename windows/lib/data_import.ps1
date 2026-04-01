@@ -66,7 +66,9 @@ function Get-DefaultDataArchive {
         Remove-Item -Path $cachedFile -Force -ErrorAction SilentlyContinue
     }
 
-    Write-Info "Downloading $ArchiveName from $ArchiveUrl"
+    Write-Detail "Downloading $ArchiveName from $ArchiveUrl"
+    $prevProgress = $ProgressPreference
+    $ProgressPreference = "SilentlyContinue"
     try {
         if ($PSVersionTable.PSVersion.Major -lt 6) {
             Invoke-WebRequest -UseBasicParsing -Uri $ArchiveUrl -OutFile $cachedFile
@@ -77,6 +79,8 @@ function Get-DefaultDataArchive {
         Write-Warn "Failed to download $ArchiveName from $ArchiveUrl"
         Remove-Item -Path $cachedFile -Force -ErrorAction SilentlyContinue
         return $null
+    } finally {
+        $ProgressPreference = $prevProgress
     }
 
     if (Test-ZipArchiveValid $cachedFile) {
@@ -104,7 +108,7 @@ function Import-DefaultDataArchive {
     if (-not (Test-DefaultDataImportForceRequested) -and (Test-Path $markerFile)) {
         $markerValue = (Get-Content $markerFile -ErrorAction SilentlyContinue | Select-Object -First 1)
         if ($markerValue -eq $ArchiveUrl) {
-            Write-Info "$ArchiveName already imported into $dataDir, skipping"
+            Write-Detail "$ArchiveName already imported into $dataDir, skipping"
             return
         }
     }
@@ -112,7 +116,7 @@ function Import-DefaultDataArchive {
     $archiveFile = Get-DefaultDataArchive $ArchiveName $ArchiveUrl
     if (-not $archiveFile) { return }
 
-    Write-Info "Copying $ArchiveName.zip into $dataDir"
+    Write-Detail "Copying $ArchiveName.zip into $dataDir"
     try {
         Copy-Item -Path $archiveFile -Destination $targetArchive -Force
         Set-Content -Path $markerFile -Value $ArchiveUrl -Encoding ASCII
@@ -125,7 +129,9 @@ function Import-DefaultDataForNacos {
     param([string]$InstallDir)
 
     if (Test-DefaultDataImportSkipRequested) {
-        Write-Info "Skipping default data import because NACOS_SETUP_SKIP_DEFAULT_DATA is set"
+        if (Get-Command Test-NacosSetupVerbose -ErrorAction SilentlyContinue) {
+            if (Test-NacosSetupVerbose) { Write-Detail "Skipping default data import because NACOS_SETUP_SKIP_DEFAULT_DATA is set" }
+        }
         return
     }
 

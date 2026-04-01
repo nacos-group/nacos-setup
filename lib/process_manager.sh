@@ -21,6 +21,81 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 source "$SCRIPT_DIR/java_manager.sh"
 
+_pm_debug() {
+    if [ "${NACOS_SETUP_DEBUG:-}" = "true" ] || [ "${NACOS_SETUP_DEBUG:-}" = "1" ]; then
+        echo "[DEBUG-PID] $*" >&2
+    fi
+}
+
+# Read PID from Nacos PID file or parse from startup log.
+_pm_read_nacos_pid() {
+    local install_dir=$1
+    local startup_log=${2:-}
+    local pid=""
+
+    local pid_file
+    for pid_file in \
+        "$install_dir/logs/nacos_server.pid" \
+        "$install_dir/logs/nacos-server.pid" \
+        "$install_dir/data/nacos_server.pid"; do
+        if [ -f "$pid_file" ]; then
+            pid=$(tr -dc '0-9' < "$pid_file" 2>/dev/null)
+            _pm_debug "pid_file=$pid_file exists, content='$pid'"
+            if [ -n "$pid" ]; then
+                printf '%s\n' "$pid"
+                return 0
+            fi
+        fi
+    done
+
+    if [ -n "$startup_log" ] && [ -f "$startup_log" ]; then
+        local matched_line
+        matched_line=$(grep -oEi '(nacos is starting|pid)[[:space:]]*[:=,][[:space:]]*[0-9]+' "$startup_log" 2>/dev/null | tail -1)
+        pid=$(echo "$matched_line" | grep -oE '[0-9]+' | tail -1)
+        _pm_debug "startup_log=$startup_log matched='$matched_line' pid='$pid'"
+        if [ -n "$pid" ]; then
+            printf '%s\n' "$pid"
+            return 0
+        fi
+    else
+        _pm_debug "startup_log='$startup_log' not found or empty"
+    fi
+
+    return 1
+}
+
+# Resolve PID by listening TCP port (macOS / Linux).
+# Echo PID on success; return 0 when found.
+_pm_get_pid_by_listen_port() {
+    local port=$1
+    local pid=""
+
+    if command -v lsof >/dev/null 2>&1; then
+        pid=$(lsof -Pi :"$port" -sTCP:LISTEN -t 2>/dev/null | head -1)
+        if [ -n "$pid" ]; then
+            _pm_debug "get_pid_by_port($port): lsof found pid='$pid'"
+            printf '%s\n' "$pid"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Cross-platform process existence check.
+# Returns: 0 running, 1 not running
+is_process_running() {
+    local pid=$1
+    if [ -z "$pid" ]; then
+        return 1
+    fi
+    if ps -p "$pid" >/dev/null 2>&1; then
+        _pm_debug "is_running($pid): ps -p OK"
+        return 0
+    fi
+    return 1
+}
+
 # ============================================================================
 # Health Check
 # ============================================================================
@@ -34,31 +109,68 @@ wait_for_nacos_ready() {
     local nacos_version=$3
     local max_wait=${4:-60}
     local wait_count=0
-    local health_url
+    local -a health_urls=()
+    local -a fallback_urls=()
     
-    # Determine health check URL based on Nacos version
+    # Determine health check URL(s) based on Nacos version
     local nacos_major=$(echo "$nacos_version" | cut -d. -f1)
     if [ "$nacos_major" -ge 3 ]; then
-        health_url="http://localhost:${console_port}/v3/console/health/readiness"
+        health_urls=(
+            "http://127.0.0.1:${console_port}/v3/console/health/readiness"
+            "http://localhost:${console_port}/v3/console/health/readiness"
+            "http://127.0.0.1:${console_port}/nacos/v3/console/health/readiness"
+            "http://localhost:${console_port}/nacos/v3/console/health/readiness"
+        )
+        # Some builds may expose only the root console endpoint at startup.
+        fallback_urls=(
+            "http://127.0.0.1:${console_port}/"
+            "http://localhost:${console_port}/"
+            "http://127.0.0.1:${main_port}/nacos/"
+            "http://localhost:${main_port}/nacos/"
+        )
     else
-        health_url="http://localhost:${main_port}/nacos/v2/console/health/readiness"
+        health_urls=(
+            "http://127.0.0.1:${main_port}/nacos/v2/console/health/readiness"
+            "http://localhost:${main_port}/nacos/v2/console/health/readiness"
+        )
+        fallback_urls=(
+            "http://127.0.0.1:${main_port}/nacos/"
+            "http://localhost:${main_port}/nacos/"
+        )
     fi
     
     while [ $wait_count -lt $max_wait ]; do
-        # Check health endpoint
-        if curl -sf "$health_url" >/dev/null 2>&1; then
-            echo -ne "\r\033[K" >&2
-            return 0
-        fi
+        local url
+
+        # 1) strict readiness endpoint(s)
+        for url in "${health_urls[@]}"; do
+            if curl --noproxy "*" --connect-timeout 2 --max-time 3 -sf "$url" >/dev/null 2>&1; then
+                if [ "$VERBOSE" = true ]; then echo -ne "\r\033[K" >&2; fi
+                return 0
+            fi
+        done
+
+        # 2) fallback: service endpoint responds with any HTTP status (not 000)
+        for url in "${fallback_urls[@]}"; do
+            local code
+            code=$(curl --noproxy "*" --connect-timeout 2 --max-time 3 -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
+            if [ "$code" != "000" ]; then
+                if [ "$VERBOSE" = true ]; then echo -ne "\r\033[K" >&2; fi
+                return 0
+            fi
+        done
         
-        # Update countdown display
-        echo -ne "\r[INFO] Waiting for Nacos to be ready... ${wait_count}s" >&2
+        # Update countdown display (verbose only to keep simple output clean)
+        if [ "$VERBOSE" = true ]; then
+            echo -ne "\r[INFO] Waiting for Nacos to be ready... ${wait_count}s" >&2
+        fi
         sleep 1
         wait_count=$((wait_count + 1))
     done
     
-    echo "" >&2
+    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
     print_warn "Nacos health check timeout after ${max_wait}s" >&2
+    print_warn "If you use a proxy, set NO_PROXY=localhost,127.0.0.1 and retry." >&2
     return 1
 }
 
@@ -81,34 +193,60 @@ initialize_admin_password() {
     fi
     
     local nacos_major=$(echo "$nacos_version" | cut -d. -f1)
-    local api_url
-    
-    # Determine password change API based on Nacos version
+    local -a api_urls=()
+    local -a methods=()
+    local retries=10
+    local i
+
     if [ "$nacos_major" -ge 3 ]; then
-        api_url="http://localhost:${console_port}/v3/auth/user/admin"
+        api_urls=(
+            "http://127.0.0.1:${console_port}/v3/auth/user/admin"
+            "http://localhost:${console_port}/v3/auth/user/admin"
+            "http://127.0.0.1:${console_port}/v3/auth/users/admin"
+            "http://localhost:${console_port}/v3/auth/users/admin"
+            "http://127.0.0.1:${console_port}/nacos/v3/auth/user/admin"
+            "http://localhost:${console_port}/nacos/v3/auth/user/admin"
+            "http://127.0.0.1:${console_port}/nacos/v3/auth/users/admin"
+            "http://localhost:${console_port}/nacos/v3/auth/users/admin"
+        )
+        methods=(POST PUT)
     else
-        api_url="http://localhost:${main_port}/nacos/v1/auth/users/admin"
+        api_urls=(
+            "http://127.0.0.1:${main_port}/nacos/v1/auth/users/admin"
+            "http://localhost:${main_port}/nacos/v1/auth/users/admin"
+        )
+        methods=(POST PUT)
     fi
-    
-    print_info "Initializing admin password..."
-    
-    # Call the password change API
-    local response
-    response=$(curl -w "\nHTTP_CODE:%{http_code}" -s -X POST "$api_url" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "password=${password}" 2>&1)
-    
-    # Extract HTTP code and body
-    local body=$(echo "$response" | sed '/HTTP_CODE:/d')
-    
-    # Check if response is successful
-    if echo "$body" | grep -q '"username"'; then
-        print_info "Admin password initialized successfully"
-        return 0
-    else
-        print_warn "Failed to initialize password automatically"
-        return 1
-    fi
+
+    print_detail "Initializing admin password..."
+
+    for ((i=0; i<retries; i++)); do
+        local method url response body http_code
+        for method in "${methods[@]}"; do
+            for url in "${api_urls[@]}"; do
+                response=$(curl --noproxy "*" --connect-timeout 2 --max-time 5 -w "\nHTTP_CODE:%{http_code}" -s -X "$method" "$url" \
+                    -H "Content-Type: application/x-www-form-urlencoded" \
+                    -d "password=${password}" 2>&1 || true)
+
+                body=$(echo "$response" | sed '/HTTP_CODE:/d')
+                http_code=$(echo "$response" | sed -n 's/^HTTP_CODE://p' | tail -n1)
+
+                # Consider success on known successful payloads or generic 2xx.
+                if echo "$body" | grep -Eq '"username"|success|\"code\"[[:space:]]*:[[:space:]]*0'; then
+                    print_detail "Admin password initialized successfully"
+                    return 0
+                fi
+                if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+                    print_detail "Admin password initialized successfully"
+                    return 0
+                fi
+            done
+        done
+        sleep 2
+    done
+
+    print_warn "Failed to initialize password automatically"
+    return 1
 }
 
 # ============================================================================
@@ -116,12 +254,13 @@ initialize_admin_password() {
 # ============================================================================
 
 # Start Nacos process
-# Parameters: install_dir, mode (standalone/cluster), use_derby (true/false)
+# Parameters: install_dir, mode (standalone/cluster), use_derby (true/false), main_port(optional)
 # Returns: PID on success, empty on failure
 start_nacos_process() {
     local install_dir=$1
     local mode=$2
     local use_derby=${3:-true}
+    local main_port=${4:-}
     
     if [ ! -d "$install_dir" ]; then
         print_error "Installation directory not found: $install_dir"
@@ -143,34 +282,89 @@ start_nacos_process() {
     fi
 
     # Start Nacos
+    local startup_log="$install_dir/logs/nacos-setup-startup.log"
+    mkdir -p "$install_dir/logs" 2>/dev/null || true
+
     if [ "$use_derby" = true ] && [ "$mode" = "cluster" ]; then
-        bash "$install_dir/bin/startup.sh" -m "$mode" -p embedded >/dev/null 2>&1
+        bash "$install_dir/bin/startup.sh" -m "$mode" -p embedded >"$startup_log" 2>&1
     else
-        bash "$install_dir/bin/startup.sh" -m "$mode" >/dev/null 2>&1
+        bash "$install_dir/bin/startup.sh" -m "$mode" >"$startup_log" 2>&1
     fi
-    
+
     # Clear JAVA_OPT after starting
     unset JAVA_OPT
     
     # Try to find the PID (may take a moment for process to bind to port)
     local pid=""
     local retry_count=0
-    local max_retries=10
-    
+    local max_retries=40
+
+    _pm_debug "=== start_nacos_process: install_dir='$install_dir' main_port='$main_port'"
+    _pm_debug "=== startup_log='$startup_log'"
+
     while [ $retry_count -lt $max_retries ]; do
         sleep 1
-        pid=$(ps aux | grep "java" | grep "$install_dir" | grep -v grep | awk '{print $2}' | head -1)
-        
-        if [ -n "$pid" ] && ps -p $pid >/dev/null 2>&1; then
-            echo "$pid"
-            return 0
+        pid=""
+
+        # Method 1: Nacos PID file or startup log (fast, cross-platform)
+        pid=$(_pm_read_nacos_pid "$install_dir" "$startup_log" || true)
+
+        if [ -z "$pid" ]; then
+            pid=$(ps aux 2>/dev/null | grep "java" | grep "$install_dir" | grep -v grep | awk '{print $2}' | head -1)
         fi
-        
+        if [ -z "$pid" ]; then
+            pid=$(ps aux 2>/dev/null | grep -i "java" | grep -i "nacos" | grep -v grep | awk '{print $2}' | head -1)
+        fi
+        if [ -z "$pid" ] && [ -n "$main_port" ]; then
+            pid=$(_pm_get_pid_by_listen_port "$main_port" || true)
+        fi
+
+        if [ -n "$pid" ]; then
+            _pm_debug "[${retry_count}s] candidate pid='$pid', checking is_process_running..."
+            if is_process_running "$pid"; then
+                _pm_debug "[${retry_count}s] SUCCESS pid='$pid' is running"
+                echo "$pid"
+                return 0
+            else
+                _pm_debug "[${retry_count}s] pid='$pid' is NOT running, will retry"
+            fi
+        fi
+
         retry_count=$((retry_count + 1))
     done
-    
+
     # Could not determine PID
+    if [ "$VERBOSE" = true ] && [ -f "$startup_log" ]; then
+        print_warn "Could not determine Nacos PID after ${max_retries}s. Startup log: $startup_log" >&2
+    fi
     echo ""
+    return 1
+}
+
+# Detect Nacos PID after the service is confirmed reachable.
+# Useful as a fallback when start_nacos_process couldn't resolve the PID
+# within its retry window but the health check later succeeded.
+# Parameters: install_dir, main_port, startup_log (optional)
+detect_nacos_pid() {
+    local install_dir=$1
+    local main_port=${2:-}
+    local startup_log=${3:-$install_dir/logs/nacos-setup-startup.log}
+    local pid=""
+
+    _pm_debug "=== detect_nacos_pid (post-ready fallback): port='$main_port'"
+
+    pid=$(_pm_read_nacos_pid "$install_dir" "$startup_log" || true)
+
+    if [ -z "$pid" ] && [ -n "$main_port" ]; then
+        _pm_debug "detect_nacos_pid: trying port-based detection..."
+        pid=$(_pm_get_pid_by_listen_port "$main_port" || true)
+    fi
+
+    _pm_debug "detect_nacos_pid: final pid='$pid'"
+    if [ -n "$pid" ] && is_process_running "$pid"; then
+        printf '%s\n' "$pid"
+        return 0
+    fi
     return 1
 }
 
@@ -185,28 +379,26 @@ stop_nacos_gracefully() {
     local pid=$1
     local timeout=${2:-10}
     
-    if [ -z "$pid" ] || ! ps -p $pid >/dev/null 2>&1; then
+    if [ -z "$pid" ] || ! is_process_running "$pid"; then
         return 0
     fi
     
-    # Try graceful shutdown
-    kill $pid 2>/dev/null
+    kill "$pid" 2>/dev/null || true
     
     # Wait for graceful shutdown
     local wait_count=0
     while [ $wait_count -lt $timeout ]; do
-        if ! ps -p $pid >/dev/null 2>&1; then
+        if ! is_process_running "$pid"; then
             return 0
         fi
         sleep 1
         wait_count=$((wait_count + 1))
     done
     
-    # Force kill if still running
-    kill -9 $pid 2>/dev/null
+    kill -9 "$pid" 2>/dev/null || true
     sleep 1
     
-    ! ps -p $pid >/dev/null 2>&1
+    ! is_process_running "$pid"
 }
 
 # ============================================================================
@@ -288,18 +480,21 @@ print_completion_info() {
     print_info "Nacos Started Successfully!"
     echo "========================================"
     echo ""
-    echo "Installation Directory: $install_dir"
-    echo "Console URL: $console_url"
+    echo "  Console URL: $console_url"
     echo ""
-    print_info "Port allocation:"
-    echo "  - Server Port: $server_port"
-    echo "  - Client gRPC Port: $((server_port + 1000))"
-    echo "  - Server gRPC Port: $((server_port + 1001))"
-    echo "  - Raft Port: $((server_port - 1000))"
-    if [ "$nacos_major" -ge 3 ]; then
-        echo "  - Console Port: $console_port"
+    if [ "$VERBOSE" = true ]; then
+        echo "  Installation: $install_dir"
+        echo ""
+        print_info "Port allocation:"
+        echo "  - Server Port: $server_port"
+        echo "  - Client gRPC Port: $((server_port + 1000))"
+        echo "  - Server gRPC Port: $((server_port + 1001))"
+        echo "  - Raft Port: $((server_port - 1000))"
+        if [ "$nacos_major" -ge 3 ]; then
+            echo "  - Console Port: $console_port"
+        fi
+        echo ""
     fi
-    echo ""
     
     local clipboard_success=false
     local browser_success=false
@@ -341,7 +536,7 @@ print_completion_info() {
     
     if [ "$should_open_browser" = true ]; then
         # Show countdown before opening browser
-        for i in 5 4 3 2 1; do
+        for i in 3 2 1; do
             echo -ne "\r[INFO] Opening console in browser in ${i}s..." >&2
             sleep 1
         done

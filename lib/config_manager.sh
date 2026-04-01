@@ -80,7 +80,17 @@ apply_datasource_config() {
                 
                 update_config_property "$config_file" "$key" "$value"
             done < "$datasource_file"
-            
+
+            # PostgreSQL 外置库：HikariCP 需显式指定 JDBC 驱动类
+            local ds_effective
+            ds_effective=$(grep -v '^[[:space:]]*#' "$datasource_file" | grep -v '^[[:space:]]*$' || true)
+            if echo "$ds_effective" | grep -qE 'spring\.(sql\.init|datasource)\.platform=postgresql' || \
+               echo "$ds_effective" | grep -qE '^db\.url\.[0-9]+=jdbc:postgresql:'; then
+                if ! echo "$ds_effective" | grep -qE '^db\.pool\.config\.driverClassName='; then
+                    update_config_property "$config_file" "db.pool.config.driverClassName" "org.postgresql.Driver"
+                fi
+            fi
+
             return 0
         fi
     fi
@@ -195,6 +205,12 @@ configure_datasource_interactive() {
         return 1
     fi
 
+    # PostgreSQL 时写入 HikariCP 驱动类（变量展开需非引号 EOF）
+    local pg_driver_line=""
+    if [ "$db_platform" = "postgresql" ]; then
+        pg_driver_line="db.pool.config.driverClassName=org.postgresql.Driver"
+    fi
+
     # Write configuration
     if ! cat > "$config_file" 2>/dev/null << EOF
 # Nacos External Datasource Configuration
@@ -218,6 +234,7 @@ db.pool.config.connectionTimeout=30000
 db.pool.config.validationTimeout=10000
 db.pool.config.maximumPoolSize=20
 db.pool.config.minimumIdle=2
+$pg_driver_line
 EOF
     then
         print_error "Cannot write to file: $config_file"
@@ -382,22 +399,24 @@ configure_standalone_security() {
         IDENTITY_VALUE=$(generate_secret_key | cut -c1-16)
         NACOS_PASSWORD=$(generate_password)
         
-        echo "" >&2
-        print_info "====================================" >&2
-        print_info "Auto-Generated Security Configuration" >&2
-        print_info "====================================" >&2
-        echo "" >&2
-        echo "JWT Token Secret Key:" >&2
-        echo "  $TOKEN_SECRET" >&2
-        echo "" >&2
-        echo "Server Identity Key:" >&2
-        echo "  $IDENTITY_KEY" >&2
-        echo "" >&2
-        echo "Server Identity Value:" >&2
-        echo "  $IDENTITY_VALUE" >&2
-        echo "" >&2
-        print_info "These credentials will be automatically configured" >&2
-        print_info "Admin password will be set after Nacos starts" >&2
+        if [ "$VERBOSE" = true ]; then
+            echo "" >&2
+            print_info "====================================" >&2
+            print_info "Auto-Generated Security Configuration" >&2
+            print_info "====================================" >&2
+            echo "" >&2
+            echo "JWT Token Secret Key:" >&2
+            echo "  $TOKEN_SECRET" >&2
+            echo "" >&2
+            echo "Server Identity Key:" >&2
+            echo "  $IDENTITY_KEY" >&2
+            echo "" >&2
+            echo "Server Identity Value:" >&2
+            echo "  $IDENTITY_VALUE" >&2
+            echo "" >&2
+            print_info "These credentials will be automatically configured" >&2
+            print_info "Admin password will be set after Nacos starts" >&2
+        fi
     else
         # Advanced mode: interactive prompts
         print_info "" >&2
@@ -455,34 +474,36 @@ configure_cluster_security() {
     local advanced_mode=${2:-false}
     local share_properties="$cluster_dir/share.properties"
     
-    echo "" >&2
+    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
     
     if [ "$advanced_mode" = false ]; then
         # Simplified mode: auto-generate all security credentials
-        print_info "Simplified mode: Auto-generating shared security keys for cluster..." >&2
+        print_detail "Simplified mode: Auto-generating shared security keys for cluster..." >&2
         
         TOKEN_SECRET=$(generate_secret_key)
         IDENTITY_KEY="nacos_cluster_$(date +%s)"
         IDENTITY_VALUE=$(generate_secret_key | cut -c1-16)
         NACOS_PASSWORD=$(generate_password)
         
-        echo "" >&2
-        print_info "===========================================" >&2
-        print_info "Auto-Generated Cluster Security Configuration" >&2
-        print_info "===========================================" >&2
-        echo "" >&2
-        echo "JWT Token Secret Key:" >&2
-        echo "  $TOKEN_SECRET" >&2
-        echo "" >&2
-        echo "Server Identity Key:" >&2
-        echo "  $IDENTITY_KEY" >&2
-        echo "" >&2
-        echo "Server Identity Value:" >&2
-        echo "  $IDENTITY_VALUE" >&2
-        echo "" >&2
-        print_info "These credentials will be shared across all cluster nodes" >&2
-        print_info "Admin password will be set after cluster startup" >&2
-        echo "" >&2
+        if [ "$VERBOSE" = true ]; then
+            echo "" >&2
+            print_info "===========================================" >&2
+            print_info "Auto-Generated Cluster Security Configuration" >&2
+            print_info "===========================================" >&2
+            echo "" >&2
+            echo "JWT Token Secret Key:" >&2
+            echo "  $TOKEN_SECRET" >&2
+            echo "" >&2
+            echo "Server Identity Key:" >&2
+            echo "  $IDENTITY_KEY" >&2
+            echo "" >&2
+            echo "Server Identity Value:" >&2
+            echo "  $IDENTITY_VALUE" >&2
+            echo "" >&2
+            print_info "These credentials will be shared across all cluster nodes" >&2
+            print_info "Admin password will be set after cluster startup" >&2
+            echo "" >&2
+        fi
     else
         # Advanced mode: allow user to customize
         print_info "===========================================" >&2
@@ -546,8 +567,8 @@ nacos.core.auth.server.identity.value=$IDENTITY_VALUE
 admin.password=$NACOS_PASSWORD
 EOF
     
-    print_info "Security configuration saved to: $share_properties" >&2
-    echo "" >&2
+    print_detail "Security configuration saved to: $share_properties" >&2
+    if [ "$VERBOSE" = true ]; then echo "" >&2; fi
 }
 
 # ============================================================================

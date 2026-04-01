@@ -37,6 +37,139 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Bash entrypoints (nacos-setup.sh, nacos-installer.sh) support Linux and macOS only.
+# Windows: use windows/nacos-installer.ps1 and windows/nacos-setup.ps1.
+nacos_setup_require_unix_os() {
+    local win=0
+    case "${OSTYPE:-}" in
+        msys*|cygwin*|win32*) win=1 ;;
+    esac
+    if [ "$win" -eq 0 ]; then
+        case "$(uname -s 2>/dev/null)" in
+            CYGWIN*|MINGW*|MSYS*|Windows_NT) win=1 ;;
+        esac
+    fi
+    if [ "$win" -eq 1 ]; then
+        print_error "This script does not support Windows. Use PowerShell instead:"
+        echo ""
+        echo "  iwr -UseBasicParsing https://nacos.io/nacos-installer.ps1 | iex"
+        echo ""
+        exit 1
+    fi
+}
+
+# ============================================================================
+# Verbose Output Control
+# ============================================================================
+
+VERBOSE="${VERBOSE:-false}"
+
+print_detail() {
+    if [ "$VERBOSE" = true ]; then
+        echo -e "${GREEN}[INFO]${NC} $1"
+    fi
+}
+
+print_step() {
+    local current=$1 total=$2 desc=$3 result="${4:-}"
+    if [ -n "$result" ]; then
+        echo -e "${GREEN}[${current}/${total}]${NC} ${desc} ${GREEN}✓${NC} ${result}"
+    else
+        echo -e "${GREEN}[${current}/${total}]${NC} ${desc} ${GREEN}✓${NC}"
+    fi
+}
+
+print_step_fail() {
+    local current=$1 total=$2 desc=$3 result="${4:-failed}"
+    echo -e "${RED}[${current}/${total}]${NC} ${desc} ${RED}✗${NC} ${result}"
+}
+
+# ============================================================================
+# Simple UI: in-progress step line (non-verbose only)
+# Shows [n/t] description with an indeterminate ASCII bar until step_simple_clear.
+# With -x/--verbose, these are no-ops; use print_detail for diagnostics.
+# ============================================================================
+
+STEP_SIMPLE_SPINNER_PID=""
+
+step_simple_clear() {
+    if [ -n "${STEP_SIMPLE_SPINNER_PID:-}" ]; then
+        kill "$STEP_SIMPLE_SPINNER_PID" 2>/dev/null || true
+        wait "$STEP_SIMPLE_SPINNER_PID" 2>/dev/null || true
+        STEP_SIMPLE_SPINNER_PID=""
+        if [ "${VERBOSE:-false}" != true ]; then
+            printf '\r\033[K'
+        fi
+    fi
+}
+
+# Start animated progress line on stdout (same stream as print_step; safe while
+# command substitutions only capture a child process's stdout).
+# Args: current total description
+step_simple_begin() {
+    local cur=$1
+    local tot=$2
+    local desc="$3"
+    if [ "${VERBOSE:-false}" = true ]; then
+        return 0
+    fi
+    step_simple_clear
+    (
+        # Detect fractional sleep support (busybox/Alpine may only accept integers).
+        local sleep_interval=0.09
+        if ! sleep 0.01 2>/dev/null; then
+            sleep_interval=1
+        fi
+        local i=0
+        local w=10
+        while true; do
+            local pos=$((i % (w + 1)))
+            local bar=""
+            local j
+            for ((j = 0; j < w; j++)); do
+                if [ "$j" -eq "$pos" ]; then
+                    bar+="="
+                else
+                    bar+="-"
+                fi
+            done
+            printf "\r\033[K${GREEN}[%s/%s]${NC} %s  [%s]" "$cur" "$tot" "$desc" "$bar"
+            i=$((i + 1))
+            sleep $sleep_interval
+        done
+    ) &
+    STEP_SIMPLE_SPINNER_PID=$!
+}
+
+# Stop simple-mode spinner; optional newline so prompts are not drawn on the spinner line.
+nacos_setup_pause_simple_ui() {
+    if declare -F step_simple_clear >/dev/null 2>&1; then
+        step_simple_clear 2>/dev/null || true
+    fi
+    if [ "${VERBOSE:-false}" != true ]; then
+        printf '\n' 2>/dev/null || true
+    fi
+}
+
+# Read one line for Y/n flows. Prefers /dev/tty for stdin and stderr so prompts stay visible
+# when stdin is a pipe and are not hidden behind the simple-mode stdout spinner. Sets REPLY.
+# Returns 0 on success, 2 if no interactive input is possible.
+nacos_setup_read_prompt() {
+    local prompt="$1"
+    nacos_setup_pause_simple_ui
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf '\n' >/dev/tty 2>/dev/null || true
+        IFS= read -r -p "$prompt" REPLY </dev/tty 2>/dev/tty || return 2
+        return 0
+    fi
+    if [ -t 0 ]; then
+        printf '\n' || true
+        IFS= read -r -p "$prompt" REPLY || return 2
+        return 0
+    fi
+    return 2
+}
+
 # ============================================================================
 # Version Comparison
 # ============================================================================
@@ -102,9 +235,6 @@ detect_os_arch() {
             ;;
         Darwin*)
             os_type="macos"
-            ;;
-        CYGWIN*|MINGW*|MSYS*)
-            os_type="windows"
             ;;
     esac
     
@@ -236,13 +366,6 @@ get_java_search_paths() {
                 "$HOME/.jenv/versions"
             )
             ;;
-        windows)
-            paths=(
-                "/c/Program Files/Java"
-                "/c/Program Files/OpenJDK"
-                "$HOME/.sdkman/candidates/java"
-            )
-            ;;
         *)
             paths=(
                 "/usr/lib/jvm"
@@ -272,7 +395,7 @@ backup_config_file() {
     
     local backup_file="${config_file}.backup.$(date +%Y%m%d_%H%M%S)"
     if cp "$config_file" "$backup_file" 2>/dev/null; then
-        print_info "Config backed up to: $backup_file" >&2
+        print_detail "Config backed up to: $backup_file" >&2
         return 0
     else
         print_warn "Failed to create backup of: $config_file" >&2
@@ -309,7 +432,7 @@ update_config_property() {
 # ============================================================================
 
 check_system_commands() {
-    print_info "Checking required system commands..."
+    print_detail "Checking required system commands..."
     
     local missing_commands=()
     local optional_missing=()
@@ -355,13 +478,13 @@ check_system_commands() {
         return 1
     fi
     
-    # Warn about missing optional commands
-    if [ ${#optional_missing[@]} -gt 0 ]; then
+    # Optional tools (lsof, etc.): only mention in verbose / advanced UX to keep simple install quiet.
+    if [ ${#optional_missing[@]} -gt 0 ] && [ "${VERBOSE:-false}" = true ]; then
         print_warn "Optional commands not found: ${optional_missing[*]}"
         print_info "Some features may be limited (port detection, process management)"
         echo ""
     fi
     
-    print_info "All required commands are available"
+    print_detail "All required commands are available"
     return 0
 }

@@ -685,15 +685,23 @@ verify_installation() {
                 print_success "PATH configured in $shell_config"
             fi
 
-            # Ask user whether to activate PATH now
-            read -p "Activate PATH now? (Y/n): " -r REPLY
-            echo ""
-            if [[ "$REPLY" =~ ^[Nn]$ ]]; then
-                print_info "To activate PATH manually, run: source $shell_config"
-                print_info "Or open a new terminal session."
+            # Activate PATH in current session
+            # When running via pipe (curl | bash), stdin is not a terminal,
+            # so we skip the interactive prompt and activate automatically.
+            if [ -t 0 ]; then
+                read -p "Activate PATH now? (Y/n): " -r REPLY
+                echo ""
+                if [[ "$REPLY" =~ ^[Nn]$ ]]; then
+                    print_info "To activate PATH manually, run: source $shell_config"
+                    print_info "Or open a new terminal session."
+                else
+                    export PATH="$HOME/.nacos/bin:$PATH"
+                    print_success "PATH has been activated in the current session."
+                fi
             else
                 export PATH="$HOME/.nacos/bin:$PATH"
                 print_success "PATH has been activated in the current session."
+                print_info "To make it permanent, run: source $shell_config"
             fi
             ;;
     esac
@@ -941,8 +949,13 @@ main() {
     # Use server version from versions file or fallback
     detected_default_version="${NACOS_SERVER_VERSION:-$FALLBACK_NACOS_SERVER_VERSION}"
 
-    read -p "Do you want to install Nacos $detected_default_version now? (Y/n): " -r REPLY
-    echo ""
+    if [ -t 0 ]; then
+        read -p "Do you want to install Nacos $detected_default_version now? (Y/n): " -r REPLY
+        echo ""
+    else
+        # Non-interactive mode (e.g. curl | bash): default to yes
+        REPLY="Y"
+    fi
     if [[ "$REPLY" =~ ^[Yy]?$ ]] || [[ -z "$REPLY" ]]; then
         print_info "Installing Nacos $detected_default_version..."
         # Always use absolute path to ensure it works even if PATH is not yet loaded

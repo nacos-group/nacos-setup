@@ -149,6 +149,39 @@ if [ -f "$LIB_DIR/db_schema.sh" ]; then
     fi
 
     rm -rf "$TEST_CACHE_DIR2"
+
+    # --- nacos-setup.sh integration tests ---
+    echo ""
+    test_info "Testing nacos-setup.sh db-schema integration"
+
+    if [ -f "$TEST_DIR/nacos-setup.sh" ]; then
+        # db-schema should not fetch versions (local mode, like db-conf)
+        output=$(bash "$TEST_DIR/nacos-setup.sh" db-schema --type mysql -v 99.99.99 2>&1)
+        if echo "$output" | grep -q "Fetching versions"; then
+            test_fail "db-schema should not fetch versions"
+        else
+            test_pass "db-schema does not fetch versions (local mode)"
+        fi
+
+        # db-schema with unknown type should fail
+        output=$(bash "$TEST_DIR/nacos-setup.sh" db-schema --type oracle -v 3.2.0 2>&1)
+        exit_code=$?
+        if [ $exit_code -ne 0 ]; then
+            test_pass "db-schema exits non-zero for unsupported type"
+        else
+            test_fail "db-schema should exit non-zero for unsupported type"
+        fi
+
+        # db-schema shows in help output
+        output=$(bash "$TEST_DIR/nacos-setup.sh" -h 2>&1)
+        if echo "$output" | grep -q "db-schema"; then
+            test_pass "db-schema appears in help output"
+        else
+            test_fail "db-schema missing from help output"
+        fi
+    else
+        test_fail "nacos-setup.sh not found"
+    fi
 else
     test_fail "db_schema.sh not found"
 fi

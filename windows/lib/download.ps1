@@ -1,54 +1,68 @@
 # Download management for Windows nacos-setup
 . $PSScriptRoot\common.ps1
 
+# Ensure TLS 1.2+ for this module (may load before main script sets it)
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+} catch {
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+}
+
 function Write-DebugLog($msg) {
     if ($env:NACOS_DEBUG -eq "1") { Write-Info "[DEBUG] $msg" }
 }
 
 $Global:CacheDir = if ($env:NACOS_CACHE_DIR) { $env:NACOS_CACHE_DIR } else { Join-Path $env:USERPROFILE ".nacos\cache" }
-$Global:DownloadBaseUrl = "https://download.nacos.io/nacos-server"
+# Use a unique variable name to avoid being shadowed by $script:DownloadBaseUrl in versions.ps1
+# which sets "https://download.nacos.io" (without /nacos-server). PowerShell scope resolution
+# in dot-sourced scripts under `powershell -File` can let $script: shadow $Global: of the same name.
+$Global:NacosServerDownloadBaseUrl = "https://download.nacos.io/nacos-server"
 $Global:RefererUrl = "https://nacos.io/download/nacos-server/"
 
-# Ensure TLS 1.2 is active for this process — nacos-setup.ps1 already sets this at startup,
-# but this guard covers cases where lib/download.ps1 is dot-sourced from other entry points
-# (e.g. a cmd-spawned PowerShell that skipped the top-level initialisation).
-try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
-} catch {
-    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
-}
-
-function Download-File-WebClient($url, $output, $referer) {
-    Write-Detail "Retrying with WebClient: $url"
+function Download-File-WebClient-Lib($url, $output) {
+    Write-Info "Downloading (WebClient fallback): $url"
     $wc = New-Object System.Net.WebClient
     try {
-        if ($referer) { $wc.Headers.Add("Referer", $referer) }
+        $wc.Headers.Add("Referer", $Global:RefererUrl)
         $wc.DownloadFile($url, $output)
     } finally {
-        $wc.Dispose()
+        if ($wc) { $wc.Dispose() }
     }
 }
 
 function Download-File($url, $output) {
-    # Set Referer header to match bash script behavior (required by some CDNs)
     $headers = @{
         "Referer" = $Global:RefererUrl
     }
+    Write-DebugLog "Downloading from URL: $url"
     $prevProgress = $ProgressPreference
     $ProgressPreference = "SilentlyContinue"
     try {
+        if ($PSVersionTable.PSVersion.Major -lt 6) {
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers -ErrorAction Stop
+        } else {
+            Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers -ErrorAction Stop
+        }
+    } catch {
+        Write-Warn "Invoke-WebRequest failed: $($_.Exception.Message)"
+        # Retry without Referer header (some CDN anti-hotlink configs reject unexpected Referers)
         try {
-            Write-Host "Downloading from URL: $url"
-            Write-Host "Headers: $headers"
-
+            Write-Info "Retrying download without Referer header..."
             if ($PSVersionTable.PSVersion.Major -lt 6) {
-                Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -Headers $headers -ErrorAction Stop
+                Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $output -ErrorAction Stop
             } else {
-                Invoke-WebRequest -Uri $url -OutFile $output -Headers $headers -ErrorAction Stop
+                Invoke-WebRequest -Uri $url -OutFile $output -ErrorAction Stop
             }
+            return
         } catch {
-            Write-Warn "Invoke-WebRequest failed ($($_.Exception.Message)); retrying with WebClient..."
-            Download-File-WebClient $url $output $Global:RefererUrl
+            Write-Warn "Retry without Referer also failed: $($_.Exception.Message)"
+        }
+        # Fall back to WebClient (handles TLS/proxy differently from Invoke-WebRequest)
+        try {
+            Download-File-WebClient-Lib $url $output
+        } catch {
+            Write-ErrorMsg "All download methods failed for: $url"
+            throw
         }
     } finally {
         $ProgressPreference = $prevProgress
@@ -58,7 +72,7 @@ function Download-File($url, $output) {
 function Download-Nacos($version) {
     Ensure-Directory $Global:CacheDir
     $zipName = "nacos-server-$version.zip"
-    $downloadUrl = "$Global:DownloadBaseUrl/$zipName"
+    $downloadUrl = "$Global:NacosServerDownloadBaseUrl/$zipName"
     $cached = Join-Path $Global:CacheDir $zipName
 
     Write-DebugLog "CacheDir: $Global:CacheDir"

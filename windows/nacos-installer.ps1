@@ -693,8 +693,6 @@ if ($reply -match '^[Nn]$') {
     Write-Info "  nacos-setup -v $serverVersion"
 } else {
     Write-Info "Starting Nacos $serverVersion via nacos-setup..."
-    # Prefer calling the PS1 directly — avoids the powershell→cmd→powershell chain that can
-    # trigger network/TLS quirks (e.g. 405 from download.nacos.io) in cmd-spawned PS processes.
     $setupPs1 = Join-Path $setupInstallDir $SetupScriptName
     if (Test-Path $setupPs1) {
         try {
@@ -706,7 +704,7 @@ if ($reply -match '^[Nn]$') {
         $setupCmd = Join-Path $SetupRootDir $SetupCmdName
         if (Test-Path $setupCmd) {
             try {
-                & cmd /c $setupCmd -v $serverVersion
+                & cmd /c "`"$setupCmd`"" -v $serverVersion
             } catch {
                 Write-Warn "nacos-setup exited with: $($_.Exception.Message)"
             }

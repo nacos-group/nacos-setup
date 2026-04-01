@@ -129,3 +129,91 @@ download_schema() {
     print_info "Check that version tag '$version' exists at https://github.com/alibaba/nacos" >&2
     return 1
 }
+
+# ============================================================================
+# Interactive Prompts
+# ============================================================================
+
+# Prompt user to select database type interactively.
+# Only works when stdin is a terminal. Outputs selected type to stdout.
+_prompt_db_type() {
+    if [ ! -t 0 ]; then
+        print_error "Database type (--type) is required in non-interactive mode" >&2
+        return 1
+    fi
+    echo "Select database type:" >&2
+    echo "  1. MySQL" >&2
+    echo "  2. PostgreSQL" >&2
+    read -p "Enter choice (1/2): " -r choice
+    case "$choice" in
+        1) echo "mysql" ;;
+        2) echo "postgresql" ;;
+        *)
+            print_error "Invalid choice: $choice" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Prompt user to enter version interactively.
+_prompt_version() {
+    if [ ! -t 0 ]; then
+        print_error "Version (--version/-v) is required in non-interactive mode" >&2
+        return 1
+    fi
+    read -p "Enter Nacos version: " -r version
+    if [ -z "$version" ]; then
+        print_error "Version cannot be empty" >&2
+        return 1
+    fi
+    echo "$version"
+}
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
+# Main function called from nacos-setup.sh.
+# Args: version (optional), db_type (optional)
+# Outputs schema SQL to stdout, all logs to stderr.
+db_schema_main() {
+    local version="$1"
+    local db_type="$2"
+
+    # Resolve missing arguments via interactive prompts
+    if [ -z "$db_type" ]; then
+        db_type=$(_prompt_db_type) || return 1
+    fi
+
+    if [ -z "$version" ]; then
+        # Try to detect locally installed version
+        local installed_dir="$HOME/.nacos"
+        local detected_version=""
+        if [ -d "$installed_dir" ]; then
+            detected_version=$(ls -d "$installed_dir"/nacos-server-*/ 2>/dev/null | sort -V | tail -1 | sed 's|.*/nacos-server-||;s|/||')
+        fi
+        if [ -n "$detected_version" ]; then
+            print_info "Detected installed version: $detected_version" >&2
+            version="$detected_version"
+        else
+            version=$(_prompt_version) || return 1
+        fi
+    fi
+
+    # Validate
+    validate_db_type "$db_type" || return 1
+
+    print_info "Exporting $db_type schema for Nacos $version..." >&2
+
+    # Try local first
+    local schema_file
+    schema_file=$(find_local_schema "$version" "$db_type" 2>/dev/null)
+
+    # Fallback to download
+    if [ -z "$schema_file" ]; then
+        schema_file=$(download_schema "$version" "$db_type") || return 1
+    fi
+
+    # Output SQL to stdout
+    cat "$schema_file"
+}

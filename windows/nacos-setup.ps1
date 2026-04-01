@@ -5,6 +5,14 @@ $ErrorActionPreference = "Stop"
 # PS 5.1: default progress UI throttles Invoke-WebRequest to ~KB/s on large files; disable for downloads.
 $ProgressPreference    = "SilentlyContinue"
 
+# HTTPS to download.nacos.io requires TLS 1.2+ on older Windows / PS 5.1 (defaults to TLS 1.0).
+# Must be set process-wide before ANY Invoke-WebRequest call — including background jobs spawned later.
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+} catch {
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+}
+
 # =============================
 # Helper functions (define before loading scripts)
 # =============================

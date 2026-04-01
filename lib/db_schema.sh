@@ -41,3 +41,32 @@ validate_db_type() {
     print_info "Supported types: ${DB_SCHEMA_SUPPORTED_TYPES[*]}" >&2
     return 1
 }
+
+# ============================================================================
+# Local Schema Lookup
+# ============================================================================
+
+# Find schema file from a local Nacos installation.
+# Uses NACOS_INSTALL_BASE env var if set (for testing), otherwise $HOME/.nacos/nacos-server-$VERSION.
+# Outputs the file path to stdout if found, empty otherwise.
+find_local_schema() {
+    local version="$1"
+    local db_type="$2"
+    local nacos_home="${NACOS_INSTALL_BASE:-$HOME/.nacos/nacos-server-$version}/nacos"
+
+    # New-style: plugin-ext directory (Nacos >3.1.1)
+    local new_path="$nacos_home/plugin-ext/nacos-datasource-plugin-${db_type}/${db_type}-schema.sql"
+    if [ -f "$new_path" ]; then
+        echo "$new_path"
+        return 0
+    fi
+
+    # Old-style: conf directory (Nacos <=3.1.1)
+    local old_path="$nacos_home/conf/${db_type}-schema.sql"
+    if [ -f "$old_path" ]; then
+        echo "$old_path"
+        return 0
+    fi
+
+    return 1
+}

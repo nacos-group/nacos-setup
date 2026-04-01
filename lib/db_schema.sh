@@ -23,6 +23,20 @@ DB_SCHEMA_SUPPORTED_TYPES=("mysql" "postgresql")
 DB_SCHEMA_CACHE_DIR="${NACOS_CACHE_DIR:-$HOME/.nacos/cache}"
 
 # ============================================================================
+# Schema File Name Mapping
+# ============================================================================
+
+# Map db_type to the actual schema file name used in Nacos repository.
+# PostgreSQL uses "pg-schema.sql" not "postgresql-schema.sql".
+_schema_filename() {
+    local db_type="$1"
+    case "$db_type" in
+        postgresql) echo "pg-schema.sql" ;;
+        *)          echo "${db_type}-schema.sql" ;;
+    esac
+}
+
+# ============================================================================
 # Validation
 # ============================================================================
 
@@ -53,16 +67,18 @@ find_local_schema() {
     local version="$1"
     local db_type="$2"
     local nacos_home="${NACOS_INSTALL_BASE:-$HOME/.nacos/nacos-server-$version}/nacos"
+    local filename
+    filename=$(_schema_filename "$db_type")
 
     # New-style: plugin-ext directory (Nacos >3.1.1)
-    local new_path="$nacos_home/plugin-ext/nacos-datasource-plugin-${db_type}/${db_type}-schema.sql"
+    local new_path="$nacos_home/plugin-ext/nacos-datasource-plugin-${db_type}/${filename}"
     if [ -f "$new_path" ]; then
         echo "$new_path"
         return 0
     fi
 
     # Old-style: conf directory (Nacos <=3.1.1)
-    local old_path="$nacos_home/conf/${db_type}-schema.sql"
+    local old_path="$nacos_home/conf/${filename}"
     if [ -f "$old_path" ]; then
         echo "$old_path"
         return 0
@@ -87,10 +103,12 @@ _schema_cache_path() {
 _schema_github_urls() {
     local version="$1"
     local db_type="$2"
-    # New path (Nacos >3.1.1, after plugin refactor)
-    echo "https://raw.githubusercontent.com/alibaba/nacos/${version}/plugin-default-impl/nacos-default-datasource-plugin/nacos-datasource-plugin-${db_type}/src/main/resources/META-INF/${db_type}-schema.sql"
-    # Old path (Nacos <=3.1.1)
-    echo "https://raw.githubusercontent.com/alibaba/nacos/${version}/distribution/conf/${db_type}-schema.sql"
+    local filename
+    filename=$(_schema_filename "$db_type")
+    # New path (Nacos >=3.2.0, after plugin refactor)
+    echo "https://raw.githubusercontent.com/alibaba/nacos/${version}/plugin-default-impl/nacos-default-datasource-plugin/nacos-datasource-plugin-${db_type}/src/main/resources/META-INF/${filename}"
+    # Old path (Nacos <3.2.0)
+    echo "https://raw.githubusercontent.com/alibaba/nacos/${version}/distribution/conf/${filename}"
 }
 
 # Download schema from GitHub with new-path-first fallback.

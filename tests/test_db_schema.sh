@@ -38,6 +38,24 @@ if [ -f "$LIB_DIR/db_schema.sh" ]; then
         test_pass "validate_db_type rejects empty string"
     fi
 
+    # --- _schema_filename tests ---
+    echo ""
+    test_info "Testing _schema_filename mapping"
+
+    result=$(_schema_filename "mysql")
+    if [ "$result" = "mysql-schema.sql" ]; then
+        test_pass "_schema_filename maps mysql -> mysql-schema.sql"
+    else
+        test_fail "_schema_filename mysql: expected mysql-schema.sql, got '$result'"
+    fi
+
+    result=$(_schema_filename "postgresql")
+    if [ "$result" = "pg-schema.sql" ]; then
+        test_pass "_schema_filename maps postgresql -> pg-schema.sql"
+    else
+        test_fail "_schema_filename postgresql: expected pg-schema.sql, got '$result'"
+    fi
+
     # --- find_local_schema tests ---
     echo ""
     test_info "Testing find_local_schema function"
@@ -79,6 +97,19 @@ if [ -f "$LIB_DIR/db_schema.sh" ]; then
     else
         test_fail "find_local_schema priority: expected new-style path, got '$result'"
     fi
+
+    # PostgreSQL uses pg-schema.sql filename
+    PG_NACOS_HOME="/tmp/test_nacos_pg/nacos"
+    mkdir -p "$PG_NACOS_HOME/conf"
+    echo "-- pg schema" > "$PG_NACOS_HOME/conf/pg-schema.sql"
+
+    result=$(NACOS_INSTALL_BASE="/tmp/test_nacos_pg" find_local_schema "test" "postgresql" 2>/dev/null)
+    if [ "$result" = "$PG_NACOS_HOME/conf/pg-schema.sql" ]; then
+        test_pass "find_local_schema finds postgresql as pg-schema.sql"
+    else
+        test_fail "find_local_schema postgresql: expected pg-schema.sql path, got '$result'"
+    fi
+    rm -rf /tmp/test_nacos_pg
 
     # Non-existent version returns empty
     result=$(NACOS_INSTALL_BASE="/tmp/test_nacos_nonexistent" find_local_schema "99.99.99" "mysql" 2>/dev/null)

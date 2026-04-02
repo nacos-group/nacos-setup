@@ -193,8 +193,8 @@ function Remove-DirectorySafe($path) {
 # ============================================================
 # Fallback versions — keep aligned with repository `versions` file
 $DefaultNacosCliVersion    = "1.0.0"
-$DefaultNacosSetupVersion  = "1.0.0"
-$DefaultNacosServerVersion = "3.2.0-BETA"
+$DefaultNacosSetupVersion  = "1.0.2"
+$DefaultNacosServerVersion = "3.2.1-2026.03.30"
 
 $Global:NacosCliVersion    = $DefaultNacosCliVersion
 $Global:NacosSetupVersion  = $DefaultNacosSetupVersion

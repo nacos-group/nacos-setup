@@ -208,6 +208,8 @@ $Global:JoinMode = $JoinMode
 $Global:LeaveMode = $LeaveMode
 $Global:NodeIndex = $NodeIndex
 $Global:DatasourceConfMode = $DatasourceConfMode
+$Global:DbSchemaMode = $false
+$Global:DbSchemaType = ""
 
 function Global:Invoke-NacosSetupCleanup {
     if ($Global:CleanupDone) { return }
@@ -246,6 +248,7 @@ function Print-Usage {
     Write-Host "  -db-conf [NAME]          Use external datasource (default: default)"
     Write-Host "  db-conf edit [NAME]      Edit datasource configuration"
     Write-Host "  db-conf show [NAME]      Show datasource configuration"
+    Write-Host "  db-schema [-v VER] [--type TYPE]  Export database schema SQL to stdout"
     Write-Host "  -h, --help               Show this help message"
     Write-Host ""
     Write-Host "Cluster Options:"
@@ -311,6 +314,42 @@ function Parse-Arguments($argv) {
                 } else {
                     Write-ErrorMsg "db-conf requires a subcommand: edit or show"
                     exit 1
+                }
+            }
+            "db-schema" {
+                $Global:DbSchemaMode = $true
+                $i++
+                # Parse db-schema specific options
+                while ($i -lt $argv.Count) {
+                    switch ($argv[$i]) {
+                        "-v" {
+                            if ($i + 1 -ge $argv.Count -or $argv[$i + 1] -match "^-") {
+                                Write-ErrorMsg "db-schema: -v/--version requires a version number"; exit 1
+                            }
+                            $Global:Version = $argv[$i + 1]; $script:UserSpecifiedVersion = $true; $i += 2
+                        }
+                        "--version" {
+                            if ($i + 1 -ge $argv.Count -or $argv[$i + 1] -match "^-") {
+                                Write-ErrorMsg "db-schema: -v/--version requires a version number"; exit 1
+                            }
+                            $Global:Version = $argv[$i + 1]; $script:UserSpecifiedVersion = $true; $i += 2
+                        }
+                        "-t" {
+                            if ($i + 1 -ge $argv.Count -or $argv[$i + 1] -match "^-") {
+                                Write-ErrorMsg "db-schema: --type requires a database type (mysql/postgresql)"; exit 1
+                            }
+                            $Global:DbSchemaType = $argv[$i + 1]; $i += 2
+                        }
+                        "--type" {
+                            if ($i + 1 -ge $argv.Count -or $argv[$i + 1] -match "^-") {
+                                Write-ErrorMsg "db-schema: --type requires a database type (mysql/postgresql)"; exit 1
+                            }
+                            $Global:DbSchemaType = $argv[$i + 1]; $i += 2
+                        }
+                        default {
+                            Write-ErrorMsg "Unknown db-schema option: $($argv[$i])"; exit 1
+                        }
+                    }
                 }
             }
             "--adv" { $Global:AdvancedMode = $true; $i++ }
@@ -710,6 +749,15 @@ try {
                 # Continue to normal installation flow (will init version below)
             }
         }
+    }
+
+    # Handle db-schema mode (local mode, doesn't need version fetching or Java)
+    if ($Global:DbSchemaMode) {
+        . (Join-Path $PSScriptRoot "lib\db_schema.ps1")
+        $schemaVersion = if ($script:UserSpecifiedVersion) { $Global:Version } else { "" }
+        $result = Export-DbSchema $schemaVersion $Global:DbSchemaType
+        if ($result -eq $false) { exit 1 }
+        exit 0
     }
 
     # Initialize version (fetch from remote only if user didn't specify -v)

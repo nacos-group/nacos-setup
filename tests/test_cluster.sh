@@ -116,9 +116,9 @@ else
     test_fail "cluster.sh not found"
 fi
 
-# 测试 10: 检查集群模式节点监控
+# 测试 10: 检查集群模式节点监控（通过 process_manager 的 is_process_running）
 if [ -f "$LIB_DIR/cluster.sh" ]; then
-    if grep -q "ps -p\|pgrep" "$LIB_DIR/cluster.sh"; then
+    if grep -q "is_process_running" "$LIB_DIR/cluster.sh"; then
         test_pass "Cluster mode monitors node processes"
     else
         test_fail "Cluster mode should monitor processes"

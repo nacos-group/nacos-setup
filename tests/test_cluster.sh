@@ -118,7 +118,7 @@ fi
 
 # 测试 10: 检查集群模式节点监控
 if [ -f "$LIB_DIR/cluster.sh" ]; then
-    if grep -q "ps -p\|pgrep" "$LIB_DIR/cluster.sh"; then
+    if grep -q "ps \|pgrep" "$LIB_DIR/cluster.sh"; then
         test_pass "Cluster mode monitors node processes"
     else
         test_fail "Cluster mode should monitor processes"

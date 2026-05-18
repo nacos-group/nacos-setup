@@ -61,5 +61,50 @@ else
     test_fail "cluster.sh not found"
 fi
 
+# 测试 6: bundled JDK 下载前应先复用系统扫描到的 Java 17+
+tmp_java_dir=$(mktemp -d 2>/dev/null || mktemp -d -t nacos-java-test)
+mock_java_home="$tmp_java_dir/jdk-21"
+mock_java="$mock_java_home/bin/java"
+mkdir -p "$mock_java_home/bin"
+printf '%s\n' \
+    '#!/bin/sh' \
+    'echo "openjdk version \"21.0.2\" 2024-01-16" >&2' \
+    'exit 0' > "$mock_java"
+chmod +x "$mock_java"
+
+if (
+    source "$LIB_DIR/common.sh"
+
+    command() {
+        if [ "$1" = "-v" ] && [ "${2:-}" = "java" ]; then
+            return 1
+        fi
+        builtin command "$@"
+    }
+
+    search_java_installation() {
+        printf '%s\n' "$mock_java"
+    }
+
+    resolve_java_home_from_cmd() {
+        printf '%s\n' "$mock_java_home"
+    }
+
+    unset JAVA_HOME
+    source "$LIB_DIR/bundled_jre_install.sh"
+
+    _confirm_bundled_jre_install() {
+        return 1
+    }
+
+    ensure_bundled_java17_for_nacos_setup "3.2.0" >/dev/null 2>&1 &&
+        [ "$JAVA_HOME" = "$mock_java_home" ]
+); then
+    test_pass "Bundled JDK gate reuses scanned Java 21 before prompting"
+else
+    test_fail "Bundled JDK gate did not reuse scanned Java 21"
+fi
+rm -rf "$tmp_java_dir"
+
 echo ""
 test_summary

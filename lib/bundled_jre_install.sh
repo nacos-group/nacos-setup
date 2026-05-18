@@ -13,6 +13,19 @@
 # Set NACOS_SETUP_SKIP_BUNDLED_JRE=1 to skip this step.
 # Set NACOS_SETUP_SKIP_AUTO_INSTALL_UNZIP=1 to refuse auto-installing unzip (fail if missing).
 
+BUNDLED_JRE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! declare -F search_java_installation >/dev/null 2>&1 && [ -f "$BUNDLED_JRE_SCRIPT_DIR/java_manager.sh" ]; then
+    _BUNDLED_JRE_CALLER_SCRIPT_DIR="${SCRIPT_DIR:-}"
+    # shellcheck source=lib/java_manager.sh
+    source "$BUNDLED_JRE_SCRIPT_DIR/java_manager.sh"
+    if [ -n "$_BUNDLED_JRE_CALLER_SCRIPT_DIR" ]; then
+        SCRIPT_DIR="$_BUNDLED_JRE_CALLER_SCRIPT_DIR"
+    else
+        unset SCRIPT_DIR
+    fi
+    unset _BUNDLED_JRE_CALLER_SCRIPT_DIR
+fi
+
 BUNDLED_JDK_CACHE_DIR="${NACOS_CACHE_DIR:-$HOME/.nacos/cache}"
 JDK17_OSS_BASE="https://download.nacos.io/base"
 
@@ -51,6 +64,36 @@ _java17_already_on_system() {
         fi
     fi
     return 1
+}
+
+_java17_search_and_apply_system_installation() {
+    if ! declare -F search_java_installation >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local java_cmd java_home
+    java_cmd=$(search_java_installation 17 false) || return 1
+    [ -n "$java_cmd" ] || return 1
+
+    if ! _java_major_at_least_17 "$java_cmd"; then
+        return 1
+    fi
+
+    if declare -F resolve_java_home_from_cmd >/dev/null 2>&1; then
+        java_home=$(resolve_java_home_from_cmd "$java_cmd" || true)
+    fi
+    if [ -z "$java_home" ]; then
+        java_home="$(dirname "$(dirname "$java_cmd")")"
+    fi
+
+    if [ ! -x "$java_home/bin/java" ]; then
+        return 1
+    fi
+
+    export JAVA_HOME="$java_home"
+    export PATH="${JAVA_HOME}/bin:${PATH}"
+    print_detail "Using system Java 17+ at JAVA_HOME=$JAVA_HOME"
+    return 0
 }
 
 # Map detect_os_arch -> OSS path segment (darwin | linux)
@@ -423,11 +466,15 @@ ensure_bundled_java17_for_nacos_setup() {
         return 0
     fi
 
+    if _java17_search_and_apply_system_installation; then
+        return 0
+    fi
+
     if _bundled_jre_reuse_if_present; then
         return 0
     fi
 
-    print_info "Nacos ${nacos_version} requires Java 17+. None found in JAVA_HOME or PATH."
+    print_info "Nacos ${nacos_version} requires Java 17+. None found in JAVA_HOME, PATH, or common Java install directories."
 
     if ! _confirm_bundled_jre_install; then
         print_info "Skipping bundled JDK installation. Exiting without starting Nacos setup."

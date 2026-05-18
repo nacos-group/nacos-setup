@@ -351,7 +351,10 @@ get_java_search_paths() {
         linux)
             paths=(
                 "/usr/lib/jvm"
+                "/usr/local/lib/jvm"
                 "/usr/java"
+                "/usr/local/java"
+                "/usr/local/jdk"
                 "/opt/java"
                 "/opt/jdk"
                 "$HOME/.sdkman/candidates/java"
@@ -362,6 +365,8 @@ get_java_search_paths() {
             paths=(
                 "/Library/Java/JavaVirtualMachines"
                 "/System/Library/Frameworks/JavaVM.framework"
+                "/opt/homebrew/opt"
+                "/usr/local/opt"
                 "$HOME/.sdkman/candidates/java"
                 "$HOME/.jenv/versions"
             )
@@ -369,7 +374,10 @@ get_java_search_paths() {
         *)
             paths=(
                 "/usr/lib/jvm"
+                "/usr/local/lib/jvm"
                 "/usr/java"
+                "/usr/local/java"
+                "/usr/local/jdk"
                 "/opt/java"
                 "/Library/Java/JavaVirtualMachines"
             )

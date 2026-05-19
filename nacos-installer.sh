@@ -459,6 +459,25 @@ install_nacos_setup() {
     
     # Export version for later use
     INSTALLED_VERSION="$setup_version"
+
+    _nacos_try_link_nacos_setup_system_symlink "$BIN_DIR/$SCRIPT_NAME"
+}
+
+# If /usr/local/bin is writable, symlink nacos-setup there so it is available
+# immediately even when the installer was invoked via sudo (which changes $HOME).
+_nacos_try_link_nacos_setup_system_symlink() {
+    local src="$1"
+    local dst="/usr/local/bin/nacos-setup"
+    [ -n "$src" ] && [ -f "$src" ] || return 0
+    if [ ! -d /usr/local/bin ]; then
+        mkdir -p /usr/local/bin 2>/dev/null || return 0
+    fi
+    if [ ! -w /usr/local/bin ]; then
+        return 0
+    fi
+    if ln -sf "$src" "$dst" 2>/dev/null; then
+        print_success "Linked nacos-setup to $dst (available without source ~/.bashrc)"
+    fi
 }
 
 # ============================================================================
@@ -823,6 +842,16 @@ uninstall_nacos_setup() {
     if [ -L "$BIN_DIR/$SCRIPT_NAME" ] || [ -f "$BIN_DIR/$SCRIPT_NAME" ]; then
         rm -f "$BIN_DIR/$SCRIPT_NAME"
         print_success "Removed $BIN_DIR/$SCRIPT_NAME"
+    fi
+
+    # Remove installer symlink in /usr/local/bin if it points to our nacos-setup
+    if [ -L /usr/local/bin/nacos-setup ]; then
+        local link_tgt
+        link_tgt=$(readlink /usr/local/bin/nacos-setup 2>/dev/null || true)
+        if [[ "$link_tgt" == "$BIN_DIR/$SCRIPT_NAME" ]]; then
+            rm -f /usr/local/bin/nacos-setup
+            print_success "Removed /usr/local/bin/nacos-setup"
+        fi
     fi
 
     # Remove installer symlink in /usr/local/bin if it points to our nacos-cli

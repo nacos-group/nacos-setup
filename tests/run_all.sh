@@ -26,6 +26,7 @@ test_cases=(
     "test_java.sh:Java Environment"
     "test_download.sh:Download & Cache"
     "test_dbconf.sh:--db-conf Feature"
+    "test_db_schema.sh:db-schema Feature"
     "test_package.sh:Package Script"
     "test_bugs.sh:Bug Verification"
     "test_install_paths.sh:Install Path Constants"

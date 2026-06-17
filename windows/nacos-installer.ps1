@@ -462,10 +462,18 @@ if ($isAdmin) {
 function Install-NacosCli {
     Write-Info "Preparing to install nacos-cli $($Global:NacosCliVersion)..."
     $os   = "windows"
-    $arch = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "386" }
+    $processorArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    $arch = switch -Regex ($processorArch) {
+        "^(AMD64|X64|X86_64)$" { "amd64"; break }
+        "^(ARM64|AARCH64)$"    { "arm64"; break }
+        default {
+            Write-ErrorMsg "Unsupported architecture for nacos-cli: $processorArch"
+            return $false
+        }
+    }
     $zipName = "nacos-cli-$($Global:NacosCliVersion)-$os-$arch.zip"
     $zipPath = Join-Path $CacheDir $zipName
-    $dlUrl   = "$DownloadBaseUrl/$zipName"
+    $dlUrl   = "$DownloadBaseUrl/nacos-cli/$zipName"
 
     # Download with cache
     if (Test-ZipValid $zipPath) {
@@ -487,10 +495,14 @@ function Install-NacosCli {
         return $false
     }
 
-    $expected = "nacos-cli-$($Global:NacosCliVersion)-$os-$arch.exe"
-    $binary   = Get-ChildItem -Path $extractDir -Recurse -Filter $expected | Select-Object -First 1
+    $expected = "nacos-cli.exe"
+    $legacyExpected = "nacos-cli-$($Global:NacosCliVersion)-$os-$arch.exe"
+    $binary = Get-ChildItem -Path $extractDir -Recurse -Filter $expected | Select-Object -First 1
     if (-not $binary) {
-        Write-ErrorMsg "Binary not found in package. Expected: $expected"
+        $binary = Get-ChildItem -Path $extractDir -Recurse -Filter $legacyExpected | Select-Object -First 1
+    }
+    if (-not $binary) {
+        Write-ErrorMsg "Binary not found in package. Expected: $expected or $legacyExpected"
         Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { Write-Info "  $($_.FullName)" }
         Remove-Item $extractDir -Recurse -Force
         return $false

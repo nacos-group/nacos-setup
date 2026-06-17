@@ -277,7 +277,7 @@ download_nacos_cli() {
     local os=$2
     local arch=$3
     local zip_filename="nacos-cli-${version}-${os}-${arch}.zip"
-    local download_url="${DOWNLOAD_BASE_URL}/${zip_filename}"
+    local download_url="${DOWNLOAD_BASE_URL}/nacos-cli/${zip_filename}"
     local cached_file="$CACHE_DIR/$zip_filename"
     
     # Create cache directory
@@ -540,9 +540,6 @@ install_nacos_cli() {
             return 1
             ;;
     esac
-    local url="${DOWNLOAD_BASE_URL}/nacos-cli-${version}-${os}-${arch}.zip"
-    local zip_filename="nacos-cli-${version}-${os}-${arch}.zip"
-    
     # Download nacos-cli (with caching)
     local zip_file=$(download_nacos_cli "$version" "$os" "$arch")
     
@@ -569,17 +566,21 @@ install_nacos_cli() {
         return 1
     fi
 
-    # Expected binary: nacos-cli-{version}-{os}-{arch}
-    local expected_binary_name="nacos-cli-${version}-${os}-${arch}"
-    local expected_binary_name_exe="${expected_binary_name}.exe"
+    # New packages contain a stable binary name; keep old names as fallback.
+    local expected_binary_name="nacos-cli"
+    local legacy_binary_name="nacos-cli-${version}-${os}-${arch}"
+    local legacy_binary_name_exe="${legacy_binary_name}.exe"
     local binary_path
     binary_path=$(find "$tmp_dir" -name "$expected_binary_name" -type f | head -1)
     if [ -z "$binary_path" ]; then
-        binary_path=$(find "$tmp_dir" -name "$expected_binary_name_exe" -type f | head -1)
+        binary_path=$(find "$tmp_dir" -name "$legacy_binary_name" -type f | head -1)
+    fi
+    if [ -z "$binary_path" ]; then
+        binary_path=$(find "$tmp_dir" -name "$legacy_binary_name_exe" -type f | head -1)
     fi
 
     if [ -z "$binary_path" ] || [ ! -f "$binary_path" ]; then
-        local expected_names="$expected_binary_name (or $expected_binary_name_exe)"
+        local expected_names="$expected_binary_name, $legacy_binary_name, or $legacy_binary_name_exe"
         print_error "Binary file not found in package. Expected: $expected_names"
         print_info "Available files in package:"
         find "$tmp_dir" -type f | sed 's|^|  |'

@@ -13,6 +13,7 @@ scripts=(
     "lib/cluster.sh"
     "lib/download.sh"
     "lib/data_import.sh"
+    "lib/skill_spector_runtime_install.sh"
     "lib/config_manager.sh"
     "lib/port_manager.sh"
     "lib/java_manager.sh"

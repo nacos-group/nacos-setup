@@ -178,6 +178,9 @@ COMMON OPTIONS:
     -x, --verbose                  Verbose output (show all detailed logs)
     -h, --help                     Show this help message
 
+UTILITY COMMANDS:
+    skill-spector install          Install SkillSpector runtime into a Nacos home
+
 STANDALONE MODE OPTIONS:
     -d, --dir DIRECTORY            Installation directory
                                    (default: ~/ai-infra/nacos/standalone/nacos-VERSION)
@@ -225,6 +228,10 @@ EXAMPLES:
   Configuration:
     # Configure global database settings
     bash nacos-setup.sh --datasource-conf
+
+  SkillSpector:
+    # Install SkillSpector runtime into an existing Nacos home
+    bash nacos-setup.sh skill-spector install --nacos-home /path/to/nacos --base-url https://example.com/nacos/ai-pipeline/skill-spector
 
 VERSION REQUIREMENTS:
     - Minimum supported: Nacos 2.4.0
@@ -460,6 +467,38 @@ setup_skill_scanner_hook_for_nacos_install() {
     }
 }
 
+run_skill_spector_command() {
+    shift
+    case "${1:-}" in
+        install)
+            shift
+            if [ ! -f "$LIB_DIR/skill_spector_runtime_install.sh" ]; then
+                print_error "SkillSpector runtime installer not found: $LIB_DIR/skill_spector_runtime_install.sh"
+                exit 1
+            fi
+            # shellcheck source=lib/skill_spector_runtime_install.sh
+            source "$LIB_DIR/skill_spector_runtime_install.sh"
+            install_skill_spector_runtime "$@"
+            exit $?
+            ;;
+        -h|--help|"")
+            if [ -f "$LIB_DIR/skill_spector_runtime_install.sh" ]; then
+                # shellcheck source=lib/skill_spector_runtime_install.sh
+                source "$LIB_DIR/skill_spector_runtime_install.sh"
+                print_skill_spector_install_usage
+            else
+                print_usage
+            fi
+            exit 0
+            ;;
+        *)
+            print_error "Unknown skill-spector subcommand: $1"
+            print_info "Usage: bash nacos-setup.sh skill-spector install [options]"
+            exit 1
+            ;;
+    esac
+}
+
 # ============================================================================
 # nacos-installer resolution status (same [INFO] style as nacos-installer.sh)
 # ============================================================================
@@ -484,6 +523,10 @@ print_nacos_installer_resolution_log() {
 # ============================================================================
 
 main() {
+    if [ "${1:-}" = "skill-spector" ]; then
+        run_skill_spector_command "$@"
+    fi
+
     # Parse command line arguments first
     parse_arguments "$@"
     export VERBOSE

@@ -141,8 +141,13 @@ Nacos 默认不内置 SkillSpector runtime。启用 `skill-spector` 审核插件
 
 ```bash
 nacos-setup skill-spector install \
-  --nacos-home /path/to/nacos \
-  --base-url https://example.com/nacos/ai-pipeline/skill-spector
+  --nacos-home /path/to/nacos
+```
+
+runtime 会安装到：
+
+```text
+<nacos-home>/runtimes/ai-pipeline/skill-spector
 ```
 
 离线环境可以使用本地 runtime 包：

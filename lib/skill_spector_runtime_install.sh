@@ -14,6 +14,7 @@
 # limitations under the License.
 
 SKILL_SPECTOR_RUNTIME_VERSION="${SKILL_SPECTOR_RUNTIME_VERSION:-2.3.9}"
+SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL="${SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL:-https://example.com/nacos/ai-pipeline/skill-spector}"
 
 print_skill_spector_install_usage() {
     cat <<EOF
@@ -24,22 +25,24 @@ Usage:
 Install SkillSpector runtime for the Nacos skill-spector pipeline.
 
 Options:
-  --base-url URL       Runtime artifact base URL.
+  --base-url URL       Override runtime artifact base URL.
                        Expected layout:
                        URL/<version>/<platform>/skillspector-runtime-<version>-<platform>.tar.gz
+                       Default: ${SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL}
   --url URL            Runtime tar.gz URL.
   --file FILE          Local runtime tar.gz file for offline installation.
   --sha256-url URL     Runtime .sha256 URL. Defaults to <runtime-url>.sha256.
   --sha256-file FILE   Local .sha256 file.
   --version VERSION    SkillSpector runtime version. Default: ${SKILL_SPECTOR_RUNTIME_VERSION}
   --platform PLATFORM  Runtime platform. Default: auto-detect, such as linux-x86_64.
-  --nacos-home DIR     Nacos home that contains plugins/ai-pipeline.
-  --plugin-dir DIR     skill-spector plugin directory.
-                       Default: <nacos-home>/plugins/ai-pipeline/skill-spector
+  --nacos-home DIR     Nacos home directory.
+  --runtime-dir DIR    skill-spector runtime directory.
+                       Default: <nacos-home>/runtimes/ai-pipeline/skill-spector
   -h, --help           Show this help.
 
 Environment variables:
   SKILL_SPECTOR_RUNTIME_BASE_URL
+  SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL
   SKILL_SPECTOR_RUNTIME_VERSION
   SKILL_SPECTOR_RUNTIME_PLATFORM
   NACOS_HOME
@@ -128,9 +131,9 @@ _skill_spector_verify_sha256() {
 
 install_skill_spector_runtime() {
     local version="${SKILL_SPECTOR_RUNTIME_VERSION}"
-    local base_url="${SKILL_SPECTOR_RUNTIME_BASE_URL:-}"
+    local base_url="${SKILL_SPECTOR_RUNTIME_BASE_URL:-${SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL}}"
     local nacos_home="${NACOS_HOME:-}"
-    local plugin_dir=""
+    local runtime_dir=""
     local platform_key="${SKILL_SPECTOR_RUNTIME_PLATFORM:-}"
     local runtime_file=""
     local runtime_url=""
@@ -180,9 +183,9 @@ install_skill_spector_runtime() {
                 nacos_home="$2"
                 shift 2
                 ;;
-            --plugin-dir)
-                [ "$#" -ge 2 ] || _skill_spector_die "--plugin-dir requires a value"
-                plugin_dir="$2"
+            --runtime-dir)
+                [ "$#" -ge 2 ] || _skill_spector_die "--runtime-dir requires a value"
+                runtime_dir="$2"
                 shift 2
                 ;;
             -h|--help)
@@ -201,9 +204,9 @@ install_skill_spector_runtime() {
         platform_key="${detected_platform}"
     fi
 
-    if [ -z "${plugin_dir}" ]; then
-        [ -n "${nacos_home}" ] || _skill_spector_die "--nacos-home is required when --plugin-dir is not set"
-        plugin_dir="${nacos_home}/plugins/ai-pipeline/skill-spector"
+    if [ -z "${runtime_dir}" ]; then
+        [ -n "${nacos_home}" ] || _skill_spector_die "--nacos-home is required when --runtime-dir is not set"
+        runtime_dir="${nacos_home}/runtimes/ai-pipeline/skill-spector"
     fi
 
     while [ "${base_url%/}" != "${base_url}" ]; do
@@ -215,7 +218,7 @@ install_skill_spector_runtime() {
         runtime_url="${base_url}/${version}/${platform_key}/${archive_name}"
     fi
     if [ -z "${runtime_file}" ] && [ -z "${runtime_url}" ]; then
-        _skill_spector_die "runtime source is required. Use --base-url, --url, or --file."
+        _skill_spector_die "runtime source is required. Set SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL, or use --base-url, --url, or --file."
     fi
 
     tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/nacos-skill-spector-install.XXXXXX")
@@ -246,11 +249,11 @@ install_skill_spector_runtime() {
 
     _skill_spector_verify_sha256 "${archive_path}" "${checksum_path}"
 
-    mkdir -p "${plugin_dir}"
-    _skill_spector_info "Extracting ${archive_path} to ${plugin_dir}"
-    tar -xzf "${archive_path}" -C "${plugin_dir}"
+    mkdir -p "${runtime_dir}"
+    _skill_spector_info "Extracting ${archive_path} to ${runtime_dir}"
+    tar -xzf "${archive_path}" -C "${runtime_dir}"
 
-    local runtime_root="${plugin_dir}/runtime/${platform_key}"
+    local runtime_root="${runtime_dir}/runtime/${platform_key}"
     local runtime_python=""
     local candidate
     for candidate in \
@@ -267,7 +270,7 @@ install_skill_spector_runtime() {
 
     [ -n "${runtime_python}" ] || _skill_spector_die "runtime python not found under ${runtime_root}"
 
-    local wrapper="${plugin_dir}/bin/skill-spector"
+    local wrapper="${runtime_dir}/bin/skill-spector"
     if [ -f "${wrapper}" ] && [ ! -x "${wrapper}" ]; then
         chmod +x "${wrapper}"
     fi

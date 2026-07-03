@@ -231,7 +231,7 @@ EXAMPLES:
 
   SkillSpector:
     # Install SkillSpector runtime into an existing Nacos home
-    bash nacos-setup.sh skill-spector install --nacos-home /path/to/nacos --base-url https://example.com/nacos/ai-pipeline/skill-spector
+    bash nacos-setup.sh skill-spector install --nacos-home /path/to/nacos
 
 VERSION REQUIREMENTS:
     - Minimum supported: Nacos 2.4.0

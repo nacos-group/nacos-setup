@@ -16,9 +16,9 @@
 # ============================================================================
 #
 # Usage: . $PSScriptRoot\lib\versions.ps1
-#        $version = Get-Version -Component <cli|setup|server> [-TimeoutSeconds <seconds>]
+#        $version = Get-Version -Component <cli|setup|server|skill-spector-runtime> [-TimeoutSeconds <seconds>]
 #
-# Components: cli, setup, server
+# Components: cli, setup, server, skill-spector-runtime
 #
 # Examples:
 #   $cliVer = Get-Version -Component cli
@@ -30,6 +30,7 @@
 #   $env:NACOS_CLI_VERSION
 #   $env:NACOS_SETUP_VERSION
 #   $env:NACOS_SERVER_VERSION
+#   $env:SKILL_SPECTOR_RUNTIME_VERSION
 #
 # ============================================================================
 
@@ -44,6 +45,7 @@ $script:VersionsUrl = "$script:DownloadBaseUrl/versions"
 $script:FallbackNacosCliVersion = "0.0.8"
 $script:FallbackNacosSetupVersion = "0.0.3"
 $script:FallbackNacosServerVersion = "3.2.0-BETA"
+$script:FallbackSkillSpectorRuntimeVersion = "2.3.11"
 
 # ============================================================================
 # Cached versions (populated on first fetch)
@@ -52,6 +54,7 @@ $script:FallbackNacosServerVersion = "3.2.0-BETA"
 $script:CachedCliVersion = ""
 $script:CachedSetupVersion = ""
 $script:CachedServerVersion = ""
+$script:CachedSkillSpectorRuntimeVersion = ""
 $script:VersionsFetched = $false
 
 # ============================================================================
@@ -138,6 +141,9 @@ function Fetch-Versions {
             elseif ($line -match "^NACOS_SERVER_VERSION=(.+)$") {
                 $script:CachedServerVersion = $matches[1].Trim()
             }
+            elseif ($line -match "^SKILL_SPECTOR_RUNTIME_VERSION=(.+)$") {
+                $script:CachedSkillSpectorRuntimeVersion = $matches[1].Trim()
+            }
         }
 
         $script:VersionsFetched = $true
@@ -165,15 +171,34 @@ function Fetch-Versions {
 function Get-Version {
     param(
         [Parameter(Mandatory=$true)]
-        [ValidateSet("cli", "setup", "server")]
+        [ValidateSet("cli", "setup", "server", "skill-spector-runtime", "skill-spector")]
         [string]$Component,
 
         [int]$TimeoutSeconds = 1
     )
 
-    $envVarName = "NACOS_$($Component.ToUpper())_VERSION"
-    $fallbackProp = "FallbackNacos$($Component.Substring(0,1).ToUpper() + $Component.Substring(1))Version"
-    $cachedProp = "Cached$($Component.Substring(0,1).ToUpper() + $Component.Substring(1))Version"
+    switch ($Component) {
+        "cli" {
+            $envVarName = "NACOS_CLI_VERSION"
+            $fallbackProp = "FallbackNacosCliVersion"
+            $cachedProp = "CachedCliVersion"
+        }
+        "setup" {
+            $envVarName = "NACOS_SETUP_VERSION"
+            $fallbackProp = "FallbackNacosSetupVersion"
+            $cachedProp = "CachedSetupVersion"
+        }
+        "server" {
+            $envVarName = "NACOS_SERVER_VERSION"
+            $fallbackProp = "FallbackNacosServerVersion"
+            $cachedProp = "CachedServerVersion"
+        }
+        default {
+            $envVarName = "SKILL_SPECTOR_RUNTIME_VERSION"
+            $fallbackProp = "FallbackSkillSpectorRuntimeVersion"
+            $cachedProp = "CachedSkillSpectorRuntimeVersion"
+        }
+    }
 
     # Check environment variable first (highest priority)
     $envValue = [Environment]::GetEnvironmentVariable($envVarName)
@@ -217,6 +242,7 @@ function Get-AllVersions {
     $script:NacosCliVersion = Get-Version -Component cli -TimeoutSeconds $TimeoutSeconds
     $script:NacosSetupVersion = Get-Version -Component setup -TimeoutSeconds $TimeoutSeconds
     $script:NacosServerVersion = Get-Version -Component server -TimeoutSeconds $TimeoutSeconds
+    $script:SkillSpectorRuntimeVersion = Get-Version -Component skill-spector-runtime -TimeoutSeconds $TimeoutSeconds
 }
 
 # Print all versions (for debugging)
@@ -225,4 +251,5 @@ function Print-Versions {
     Write-Host "  CLI:    $(Get-Version -Component cli) (fallback: $script:FallbackNacosCliVersion)"
     Write-Host "  Setup:  $(Get-Version -Component setup) (fallback: $script:FallbackNacosSetupVersion)"
     Write-Host "  Server: $(Get-Version -Component server) (fallback: $script:FallbackNacosServerVersion)"
+    Write-Host "  SkillSpector Runtime: $(Get-Version -Component skill-spector-runtime) (fallback: $script:FallbackSkillSpectorRuntimeVersion)"
 }

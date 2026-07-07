@@ -13,10 +13,114 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-SKILL_SPECTOR_RUNTIME_VERSION="${SKILL_SPECTOR_RUNTIME_VERSION:-2.3.9}"
-SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL="${SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL:-https://example.com/nacos/ai-pipeline/skill-spector}"
+FALLBACK_SKILL_SPECTOR_RUNTIME_VERSION="${FALLBACK_SKILL_SPECTOR_RUNTIME_VERSION:-2.3.11}"
+DOWNLOAD_BASE_URL="${DOWNLOAD_BASE_URL:-https://download.nacos.io}"
+SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL="${SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL:-${DOWNLOAD_BASE_URL}/skill-spector}"
+MIN_NACOS_VERSION_FOR_SKILL_SPECTOR="3.2.0"
+SKILL_SPECTOR_RUNTIME_PATH_RELATIVE="ai-infra/ai-pipeline/skill-spector"
+SKILL_SPECTOR_INSTALLED="false"
+
+_skill_spector_source_versions() {
+    if declare -F get_version >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -f "${script_dir}/versions.sh" ]; then
+        # shellcheck source=lib/versions.sh
+        source "${script_dir}/versions.sh"
+    fi
+}
+
+_skill_spector_default_runtime_version() {
+    _skill_spector_source_versions
+    if declare -F get_version >/dev/null 2>&1; then
+        get_version skill-spector-runtime 1
+        return
+    fi
+    printf '%s\n' "${FALLBACK_SKILL_SPECTOR_RUNTIME_VERSION}"
+}
+
+_skill_spector_default_runtime_dir() {
+    local version="${1:-$(_skill_spector_default_runtime_version)}"
+    env "PATH=$PATH" bash -c 'printf "%s/%s/%s\n" "$HOME" "$1" "$2"' \
+        _ "$SKILL_SPECTOR_RUNTIME_PATH_RELATIVE" "$version"
+}
+
+_skill_spector_command_path_for_dir() {
+    printf '%s/bin/skill-spector\n' "$1"
+}
+
+_get_skill_spector_command_path() {
+    local version runtime_dir wrapper
+    version="${SKILL_SPECTOR_RUNTIME_VERSION:-$(_skill_spector_default_runtime_version)}"
+    runtime_dir="${SKILL_SPECTOR_RUNTIME_DIR:-$(_skill_spector_default_runtime_dir "$version")}"
+    wrapper=$(_skill_spector_command_path_for_dir "$runtime_dir")
+    if [ -x "$wrapper" ]; then
+        printf '%s\n' "$wrapper"
+        return 0
+    fi
+    command -v skill-spector 2>/dev/null
+}
+
+_skill_spector_ensure_version_ge() {
+    if declare -F version_ge >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -f "${script_dir}/common.sh" ]; then
+        # shellcheck source=common.sh
+        source "${script_dir}/common.sh"
+    fi
+    declare -F version_ge >/dev/null 2>&1
+}
+
+_skill_spector_should_write_plugin_config() {
+    if [ "${NACOS_SETUP_SKIP_SKILL_SPECTOR:-}" = "1" ] || [ "${NACOS_SETUP_SKIP_SKILL_SPECTOR:-}" = "true" ]; then
+        return 1
+    fi
+    if ! _skill_spector_ensure_version_ge; then
+        return 1
+    fi
+    if ! version_ge "${VERSION:-0}" "$MIN_NACOS_VERSION_FOR_SKILL_SPECTOR"; then
+        return 1
+    fi
+    if [ "$SKILL_SPECTOR_INSTALLED" = "true" ]; then
+        return 0
+    fi
+    if [ -n "$(_get_skill_spector_command_path 2>/dev/null || true)" ]; then
+        return 0
+    fi
+    return 1
+}
+
+configure_skill_spector_properties() {
+    local config_file="$1"
+
+    if [ -z "$config_file" ] || [ ! -f "$config_file" ]; then
+        return 1
+    fi
+
+    print_detail "Configuring skill-spector plugin properties in ${config_file}"
+
+    update_config_property "$config_file" "nacos.plugin.ai-pipeline.enabled" "true"
+    append_config_csv_property_value "$config_file" "nacos.plugin.ai-pipeline.type" "skill-spector"
+
+    local skill_spector_cmd
+    skill_spector_cmd=$(_get_skill_spector_command_path || true)
+    if [ -n "$skill_spector_cmd" ]; then
+        update_config_property "$config_file" "nacos.plugin.ai-pipeline.skill-spector.command" "$skill_spector_cmd"
+    fi
+
+    print_detail "skill-spector plugin properties configured successfully"
+}
 
 print_skill_spector_install_usage() {
+    local default_version
+    default_version="${SKILL_SPECTOR_RUNTIME_VERSION:-$(_skill_spector_default_runtime_version)}"
     cat <<EOF
 Usage:
   nacos-setup skill-spector install [options]
@@ -27,17 +131,17 @@ Install SkillSpector runtime for the Nacos skill-spector pipeline.
 Options:
   --base-url URL       Override runtime artifact base URL.
                        Expected layout:
-                       URL/<version>/<platform>/skillspector-runtime-<version>-<platform>.tar.gz
+                       URL/skillspector-runtime-<version>-<platform>.tar.gz
                        Default: ${SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL}
   --url URL            Runtime tar.gz URL.
   --file FILE          Local runtime tar.gz file for offline installation.
   --sha256-url URL     Runtime .sha256 URL. Defaults to <runtime-url>.sha256.
   --sha256-file FILE   Local .sha256 file.
-  --version VERSION    SkillSpector runtime version. Default: ${SKILL_SPECTOR_RUNTIME_VERSION}
+  --version VERSION    SkillSpector runtime version. Default: ${default_version}
   --platform PLATFORM  Runtime platform. Default: auto-detect, such as linux-x86_64.
-  --nacos-home DIR     Nacos home directory.
+  --nacos-home DIR     Accepted for compatibility; not required for command-mode installation.
   --runtime-dir DIR    skill-spector runtime directory.
-                       Default: <nacos-home>/runtimes/ai-pipeline/skill-spector
+                       Default: ~/ai-infra/ai-pipeline/skill-spector/<version>
   -h, --help           Show this help.
 
 Environment variables:
@@ -45,6 +149,7 @@ Environment variables:
   SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL
   SKILL_SPECTOR_RUNTIME_VERSION
   SKILL_SPECTOR_RUNTIME_PLATFORM
+  SKILL_SPECTOR_RUNTIME_DIR
   NACOS_HOME
 EOF
 }
@@ -130,10 +235,10 @@ _skill_spector_verify_sha256() {
 }
 
 install_skill_spector_runtime() {
-    local version="${SKILL_SPECTOR_RUNTIME_VERSION}"
+    local version="${SKILL_SPECTOR_RUNTIME_VERSION:-$(_skill_spector_default_runtime_version)}"
     local base_url="${SKILL_SPECTOR_RUNTIME_BASE_URL:-${SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL}}"
     local nacos_home="${NACOS_HOME:-}"
-    local runtime_dir=""
+    local runtime_dir="${SKILL_SPECTOR_RUNTIME_DIR:-}"
     local platform_key="${SKILL_SPECTOR_RUNTIME_PLATFORM:-}"
     local runtime_file=""
     local runtime_url=""
@@ -205,8 +310,7 @@ install_skill_spector_runtime() {
     fi
 
     if [ -z "${runtime_dir}" ]; then
-        [ -n "${nacos_home}" ] || _skill_spector_die "--nacos-home is required when --runtime-dir is not set"
-        runtime_dir="${nacos_home}/runtimes/ai-pipeline/skill-spector"
+        runtime_dir=$(_skill_spector_default_runtime_dir "${version}")
     fi
 
     while [ "${base_url%/}" != "${base_url}" ]; do
@@ -215,7 +319,7 @@ install_skill_spector_runtime() {
 
     local archive_name="skillspector-runtime-${version}-${platform_key}.tar.gz"
     if [ -z "${runtime_file}" ] && [ -z "${runtime_url}" ] && [ -n "${base_url}" ]; then
-        runtime_url="${base_url}/${version}/${platform_key}/${archive_name}"
+        runtime_url="${base_url}/${archive_name}"
     fi
     if [ -z "${runtime_file}" ] && [ -z "${runtime_url}" ]; then
         _skill_spector_die "runtime source is required. Set SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL, or use --base-url, --url, or --file."
@@ -284,6 +388,70 @@ install_skill_spector_runtime() {
     _skill_spector_info "  version: ${version}"
     _skill_spector_info "  platform: ${platform_key}"
     _skill_spector_info "  runtime: ${runtime_root}"
+    _skill_spector_info "  command: ${wrapper}"
+}
+
+_confirm_skill_spector_runtime_install() {
+    local runtime_version="$1"
+    local runtime_dir="$2"
+    local prompt="Install SkillSpector runtime ${runtime_version} to ${runtime_dir}? (Y/n): "
+
+    if declare -F nacos_setup_read_prompt >/dev/null 2>&1; then
+        if ! nacos_setup_read_prompt "$prompt"; then
+            return 1
+        fi
+    elif [ -t 0 ]; then
+        IFS= read -r -p "$prompt" REPLY || return 1
+    else
+        return 1
+    fi
+
+    case "${REPLY:-Y}" in
+        [Yy]|[Yy][Ee][Ss]|"") return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+maybe_install_skill_spector_for_nacos() {
+    local nacos_version="${1:-}"
+
+    if [ "${NACOS_SETUP_SKIP_SKILL_SPECTOR:-}" = "1" ] || [ "${NACOS_SETUP_SKIP_SKILL_SPECTOR:-}" = "true" ]; then
+        return 0
+    fi
+
+    if [ -z "$nacos_version" ]; then
+        return 0
+    fi
+
+    if ! _skill_spector_ensure_version_ge; then
+        print_warn "skill-spector step skipped: version_ge unavailable (reinstall nacos-setup from a build that includes lib/common.sh)"
+        return 0
+    fi
+
+    if ! version_ge "$nacos_version" "$MIN_NACOS_VERSION_FOR_SKILL_SPECTOR"; then
+        return 0
+    fi
+
+    local runtime_version runtime_dir command_path
+    runtime_version="${SKILL_SPECTOR_RUNTIME_VERSION:-$(_skill_spector_default_runtime_version)}"
+    runtime_dir="${SKILL_SPECTOR_RUNTIME_DIR:-$(_skill_spector_default_runtime_dir "$runtime_version")}"
+
+    command_path=$(_get_skill_spector_command_path || true)
+    if [ -n "$command_path" ]; then
+        SKILL_SPECTOR_INSTALLED="true"
+        print_info "skill-spector already installed at ${command_path} (skip)."
+        return 0
+    fi
+
+    if ! _confirm_skill_spector_runtime_install "$runtime_version" "$runtime_dir"; then
+        print_info "Skipping skill-spector runtime setup. Continuing Nacos startup."
+        return 0
+    fi
+
+    if install_skill_spector_runtime --version "$runtime_version" --runtime-dir "$runtime_dir"; then
+        SKILL_SPECTOR_INSTALLED="true"
+    fi
+    return 0
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

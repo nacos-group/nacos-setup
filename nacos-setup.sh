@@ -179,7 +179,7 @@ COMMON OPTIONS:
     -h, --help                     Show this help message
 
 UTILITY COMMANDS:
-    skill-spector install          Install SkillSpector runtime into a Nacos home
+    skill-spector install          Install SkillSpector runtime for command-mode scanning
 
 STANDALONE MODE OPTIONS:
     -d, --dir DIRECTORY            Installation directory
@@ -230,8 +230,8 @@ EXAMPLES:
     bash nacos-setup.sh --datasource-conf
 
   SkillSpector:
-    # Install SkillSpector runtime into an existing Nacos home
-    bash nacos-setup.sh skill-spector install --nacos-home /path/to/nacos
+    # Install SkillSpector runtime into the default tools directory
+    bash nacos-setup.sh skill-spector install
 
 VERSION REQUIREMENTS:
     - Minimum supported: Nacos 2.4.0
@@ -448,15 +448,19 @@ validate_arguments() {
 }
 
 # ============================================================================
-# Skill-scanner post-install hook (lib/skill_scanner_install.sh)
+# Scan plugin post-install hook (lib/skill_scanner_install.sh, lib/skill_spector_runtime_install.sh)
 # Called from standalone/cluster after Nacos config is written. Pre-load here so
 # post_nacos_config_hook exists even if a partial/older lib omits the call path.
 # ============================================================================
 
-setup_skill_scanner_hook_for_nacos_install() {
+setup_scan_plugin_hooks_for_nacos_install() {
     if [ -f "$LIB_DIR/skill_scanner_install.sh" ]; then
         # shellcheck source=lib/skill_scanner_install.sh
         source "$LIB_DIR/skill_scanner_install.sh"
+    fi
+    if [ -f "$LIB_DIR/skill_spector_runtime_install.sh" ]; then
+        # shellcheck source=lib/skill_spector_runtime_install.sh
+        source "$LIB_DIR/skill_spector_runtime_install.sh"
     fi
     post_nacos_config_hook() {
         if declare -F maybe_install_skill_scanner_for_nacos >/dev/null 2>&1; then
@@ -464,7 +468,14 @@ setup_skill_scanner_hook_for_nacos_install() {
         else
             echo "[nacos-setup/skill-scanner] skipped: missing $LIB_DIR/skill_scanner_install.sh (reinstall or copy from nacos-setup source tree)" >&2
         fi
+        if declare -F maybe_install_skill_spector_for_nacos >/dev/null 2>&1; then
+            maybe_install_skill_spector_for_nacos "$VERSION"
+        fi
     }
+}
+
+setup_skill_scanner_hook_for_nacos_install() {
+    setup_scan_plugin_hooks_for_nacos_install
 }
 
 run_skill_spector_command() {
@@ -598,7 +609,7 @@ main() {
     # Disable set -e for mode execution (they handle errors internally)
     set +e
 
-    setup_skill_scanner_hook_for_nacos_install
+    setup_scan_plugin_hooks_for_nacos_install
     
     # Route to appropriate mode
     case "$MODE" in

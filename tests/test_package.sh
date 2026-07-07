@@ -28,6 +28,7 @@ if [ -f "$TEST_DIR/windows/nacos-installer.ps1" ] && [ -f "$TEST_DIR/versions" ]
     cli_version=$(grep '^NACOS_CLI_VERSION=' "$TEST_DIR/versions" | cut -d'=' -f2)
     setup_version=$(grep '^NACOS_SETUP_VERSION=' "$TEST_DIR/versions" | cut -d'=' -f2)
     server_version=$(grep '^NACOS_SERVER_VERSION=' "$TEST_DIR/versions" | cut -d'=' -f2)
+    skill_spector_runtime_version=$(grep '^SKILL_SPECTOR_RUNTIME_VERSION=' "$TEST_DIR/versions" | cut -d'=' -f2)
 
     if grep -q "\$DefaultNacosCliVersion    = \"$cli_version\"" "$TEST_DIR/windows/nacos-installer.ps1" && \
        grep -q "\$DefaultNacosSetupVersion  = \"$setup_version\"" "$TEST_DIR/windows/nacos-installer.ps1" && \
@@ -38,6 +39,29 @@ if [ -f "$TEST_DIR/windows/nacos-installer.ps1" ] && [ -f "$TEST_DIR/versions" ]
     fi
 else
     test_fail "windows/nacos-installer.ps1 or versions file not found"
+fi
+
+if [ -f "$TEST_DIR/lib/versions.sh" ] && [ -f "$TEST_DIR/lib/skill_spector_runtime_install.sh" ]; then
+    skill_spector_get_version=$(bash -c "source '$TEST_DIR/lib/versions.sh'; SKILL_SPECTOR_RUNTIME_VERSION='$skill_spector_runtime_version' get_version skill-spector-runtime 0")
+    skill_spector_install_default=$(bash -c "source '$TEST_DIR/lib/skill_spector_runtime_install.sh'; SKILL_SPECTOR_RUNTIME_VERSION='$skill_spector_runtime_version' _skill_spector_default_runtime_version")
+    skill_spector_usage=$(bash -c "source '$TEST_DIR/lib/skill_spector_runtime_install.sh'; print_skill_spector_install_usage")
+
+    if [ "$skill_spector_get_version" = "$skill_spector_runtime_version" ] && \
+       [ "$skill_spector_install_default" = "$skill_spector_runtime_version" ]; then
+        test_pass "SkillSpector runtime version uses unified version management"
+    else
+        test_fail "SkillSpector runtime version is not aligned with unified version management"
+    fi
+
+    if echo "$skill_spector_usage" | grep -q "Default: https://download.nacos.io/skill-spector" && \
+       echo "$skill_spector_usage" | grep -q "URL/skillspector-runtime-<version>-<platform>.tar.gz" && \
+       echo "$skill_spector_usage" | grep -q "~/ai-infra/ai-pipeline/skill-spector/<version>"; then
+        test_pass "SkillSpector runtime default download path is skill-spector"
+    else
+        test_fail "SkillSpector runtime default download path is incorrect"
+    fi
+else
+    test_fail "lib/versions.sh or lib/skill_spector_runtime_install.sh not found"
 fi
 
 echo ""

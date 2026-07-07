@@ -19,7 +19,7 @@ echo "=== Bug Condition Exploration: skill-scanner config ==="
 #   → standalone.sh and cluster.sh use "command -v skill-scanner" as the gate
 #   → Expected on UNFIXED code: grep finds "command -v skill-scanner" used as
 #     the condition for calling configure_skill_scanner_properties  → FAIL
-#   → Expected on FIXED code: the condition uses SKILL_SCANNER_INSTALLED flag
+#   → Expected on FIXED code: the condition uses _skill_scanner_should_write_plugin_config
 #     instead of "command -v"  → PASS
 # ============================================================================
 
@@ -51,7 +51,7 @@ if grep -q 'command -v skill-scanner' "$LIB_DIR/standalone.sh"; then
     # UNFIXED code: the pattern exists → bug confirmed → test FAILS (expected)
     test_fail "A-2: standalone.sh still uses 'command -v skill-scanner' to gate config writes (bug present)"
 else
-    # FIXED code: pattern replaced with SKILL_SCANNER_INSTALLED check
+# FIXED code: pattern replaced with _skill_scanner_should_write_plugin_config check
     test_pass "A-2: standalone.sh no longer uses 'command -v skill-scanner' to gate config writes"
 fi
 
@@ -63,20 +63,20 @@ else
     test_pass "A-3: cluster.sh no longer uses 'command -v skill-scanner' to gate config writes"
 fi
 
-# A-4: Verify that standalone.sh uses SKILL_SCANNER_INSTALLED as the condition
-test_info "A-4: Checking standalone.sh for SKILL_SCANNER_INSTALLED flag check"
-if grep -q 'SKILL_SCANNER_INSTALLED' "$LIB_DIR/standalone.sh"; then
-    test_pass "A-4: standalone.sh uses SKILL_SCANNER_INSTALLED flag"
+# A-4: Verify that standalone.sh uses _skill_scanner_should_write_plugin_config as the condition
+test_info "A-4: Checking standalone.sh for _skill_scanner_should_write_plugin_config gate"
+if grep -q '_skill_scanner_should_write_plugin_config' "$LIB_DIR/standalone.sh"; then
+    test_pass "A-4: standalone.sh uses _skill_scanner_should_write_plugin_config gate"
 else
-    test_fail "A-4: standalone.sh does not use SKILL_SCANNER_INSTALLED flag (fix not applied)"
+    test_fail "A-4: standalone.sh does not use _skill_scanner_should_write_plugin_config gate"
 fi
 
-# A-5: Verify that cluster.sh uses SKILL_SCANNER_INSTALLED as the condition
-test_info "A-5: Checking cluster.sh for SKILL_SCANNER_INSTALLED flag check"
-if grep -q 'SKILL_SCANNER_INSTALLED' "$LIB_DIR/cluster.sh"; then
-    test_pass "A-5: cluster.sh uses SKILL_SCANNER_INSTALLED flag"
+# A-5: Verify that cluster.sh uses _skill_scanner_should_write_plugin_config as the condition
+test_info "A-5: Checking cluster.sh for _skill_scanner_should_write_plugin_config gate"
+if grep -q '_skill_scanner_should_write_plugin_config' "$LIB_DIR/cluster.sh"; then
+    test_pass "A-5: cluster.sh uses _skill_scanner_should_write_plugin_config gate"
 else
-    test_fail "A-5: cluster.sh does not use SKILL_SCANNER_INSTALLED flag (fix not applied)"
+    test_fail "A-5: cluster.sh does not use _skill_scanner_should_write_plugin_config gate"
 fi
 
 # Cleanup mock

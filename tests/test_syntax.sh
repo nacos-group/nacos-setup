@@ -9,6 +9,7 @@ echo "=== Test Group: Syntax Check ==="
 scripts=(
     "nacos-setup.sh"
     "lib/common.sh"
+    "lib/versions.sh"
     "lib/standalone.sh"
     "lib/cluster.sh"
     "lib/download.sh"

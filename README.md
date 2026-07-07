@@ -137,26 +137,32 @@ nacos-setup -db-conf -c prod -n 3
 
 ### 场景四：安装 SkillSpector runtime
 
-Nacos 默认不内置 SkillSpector runtime。启用 `skill-spector` 审核插件前，先把 runtime 安装到目标 Nacos 目录：
+Nacos 默认不内置 SkillSpector runtime。启用 `skill-spector` 审核插件前，先安装 runtime：
 
 ```bash
-nacos-setup skill-spector install \
-  --nacos-home /path/to/nacos
+nacos-setup skill-spector install
 ```
+
+默认从 `https://download.nacos.io/skill-spector` 下载对应平台的 runtime 包。
 
 runtime 会安装到：
 
 ```text
-<nacos-home>/runtimes/ai-pipeline/skill-spector
+~/ai-infra/ai-pipeline/skill-spector/<version>
+```
+
+然后在 Nacos 配置中使用安装后的 wrapper 路径：
+
+```properties
+nacos.plugin.ai-pipeline.skill-spector.command=~/ai-infra/ai-pipeline/skill-spector/<version>/bin/skill-spector
 ```
 
 离线环境可以使用本地 runtime 包：
 
 ```bash
 nacos-setup skill-spector install \
-  --nacos-home /path/to/nacos \
-  --file /path/to/skillspector-runtime-2.3.9-linux-x86_64.tar.gz \
-  --sha256-file /path/to/skillspector-runtime-2.3.9-linux-x86_64.tar.gz.sha256
+  --file /path/to/skillspector-runtime-2.3.11-linux-x86_64.tar.gz \
+  --sha256-file /path/to/skillspector-runtime-2.3.11-linux-x86_64.tar.gz.sha256
 ```
 
 ## 📖 使用说明

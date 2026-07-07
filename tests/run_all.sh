@@ -31,6 +31,7 @@ test_cases=(
     "test_install_paths.sh:Install Path Constants"
     "test_no_sudo.sh:No Sudo Suggestions"
     "test_skill_scanner_sudo.sh:Skill Scanner Sudo Removal"
+    "test_skill_spector_runtime_install.sh:SkillSpector Runtime Installer"
     "test_path_management.sh:PATH Management"
     "test_uninstall.sh:Uninstall Cleanup"
 )

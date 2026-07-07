@@ -29,33 +29,40 @@ else
     test_fail "Default runtime dir is incorrect: $default_dir"
 fi
 
+stable_cmd=$(HOME="$HOME_DIR" _skill_spector_write_command_entry "$RUNTIME_DIR/bin/skill-spector")
+if [ "$stable_cmd" = "$HOME_DIR/ai-infra/ai-pipeline/bin/skill-spector" ] && [ -x "$stable_cmd" ]; then
+    test_pass "Stable command entry uses ai-pipeline bin path"
+else
+    test_fail "Stable command entry is incorrect: $stable_cmd"
+fi
+
 cat > "$CONFIG_FILE" << 'EOF'
 nacos.plugin.ai-pipeline.type=skill-scanner
 EOF
 
-VERSION=3.3.0 SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" configure_skill_spector_properties "$CONFIG_FILE"
+VERSION=3.3.0 HOME="$HOME_DIR" SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" configure_skill_spector_properties "$CONFIG_FILE"
 
 if grep -q "^nacos.plugin.ai-pipeline.enabled=true$" "$CONFIG_FILE" && \
    grep -q "^nacos.plugin.ai-pipeline.type=skill-scanner,skill-spector$" "$CONFIG_FILE" && \
-   grep -q "^nacos.plugin.ai-pipeline.skill-spector.command=$RUNTIME_DIR/bin/skill-spector$" "$CONFIG_FILE"; then
+   grep -q "^nacos.plugin.ai-pipeline.skill-spector.command=$stable_cmd$" "$CONFIG_FILE"; then
     test_pass "SkillSpector config writes enabled, merged type, and command"
 else
     test_fail "SkillSpector config was not written correctly"
 fi
 
-if VERSION=3.3.0 SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" _skill_spector_should_write_plugin_config; then
+if VERSION=3.3.0 HOME="$HOME_DIR" SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" _skill_spector_should_write_plugin_config; then
     test_pass "SkillSpector config gate allows installed runtime"
 else
     test_fail "SkillSpector config gate should allow installed runtime"
 fi
 
-if VERSION=3.2.0 SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" _skill_spector_should_write_plugin_config; then
+if VERSION=3.2.0 HOME="$HOME_DIR" SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" _skill_spector_should_write_plugin_config; then
     test_fail "SkillSpector config gate should reject Nacos 3.2.x"
 else
     test_pass "SkillSpector config gate rejects Nacos 3.2.x"
 fi
 
-if NACOS_SETUP_SKIP_SKILL_SPECTOR=1 VERSION=3.3.0 SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" _skill_spector_should_write_plugin_config; then
+if NACOS_SETUP_SKIP_SKILL_SPECTOR=1 VERSION=3.3.0 HOME="$HOME_DIR" SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" _skill_spector_should_write_plugin_config; then
     test_fail "SkillSpector config gate should honor skip env"
 else
     test_pass "SkillSpector config gate honors skip env"

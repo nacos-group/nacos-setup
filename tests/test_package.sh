@@ -55,7 +55,8 @@ if [ -f "$TEST_DIR/lib/versions.sh" ] && [ -f "$TEST_DIR/lib/skill_spector_runti
 
     if echo "$skill_spector_usage" | grep -q "Default: https://download.nacos.io/skill-spector" && \
        echo "$skill_spector_usage" | grep -q "URL/skillspector-runtime-<version>-<platform>.tar.gz" && \
-       echo "$skill_spector_usage" | grep -q "~/ai-infra/ai-pipeline/skill-spector/<version>"; then
+       echo "$skill_spector_usage" | grep -q "~/ai-infra/ai-pipeline/skill-spector/<version>" && \
+       echo "$skill_spector_usage" | grep -q "~/ai-infra/ai-pipeline/bin/skill-spector"; then
         test_pass "SkillSpector runtime default download path is skill-spector"
     else
         test_fail "SkillSpector runtime default download path is incorrect"

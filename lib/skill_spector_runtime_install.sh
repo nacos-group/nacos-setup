@@ -18,6 +18,7 @@ DOWNLOAD_BASE_URL="${DOWNLOAD_BASE_URL:-https://download.nacos.io}"
 SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL="${SKILL_SPECTOR_RUNTIME_DEFAULT_BASE_URL:-${DOWNLOAD_BASE_URL}/skill-spector}"
 MIN_NACOS_VERSION_FOR_SKILL_SPECTOR="3.3.0"
 SKILL_SPECTOR_RUNTIME_PATH_RELATIVE="ai-infra/ai-pipeline/skill-spector"
+SKILL_SPECTOR_COMMAND_PATH_RELATIVE="ai-infra/ai-pipeline/bin/skill-spector"
 SKILL_SPECTOR_INSTALLED="false"
 
 _skill_spector_source_versions() {
@@ -52,8 +53,39 @@ _skill_spector_command_path_for_dir() {
     printf '%s/bin/skill-spector\n' "$1"
 }
 
+_skill_spector_default_command_path() {
+    env "PATH=$PATH" bash -c 'printf "%s/%s\n" "$HOME" "$1"' \
+        _ "$SKILL_SPECTOR_COMMAND_PATH_RELATIVE"
+}
+
+_skill_spector_shell_quote() {
+    local value="$1"
+    printf "'"
+    printf '%s' "$value" | sed "s/'/'\\\\''/g"
+    printf "'"
+}
+
+_skill_spector_write_command_entry() {
+    local wrapper="$1"
+    local command_path
+    command_path=$(_skill_spector_default_command_path)
+    mkdir -p "$(dirname "$command_path")"
+    {
+        printf '#!/bin/sh\n'
+        printf 'SKILL_SPECTOR_RUNTIME_WRAPPER=%s\n' "$(_skill_spector_shell_quote "$wrapper")"
+        printf 'exec "$SKILL_SPECTOR_RUNTIME_WRAPPER" "$@"\n'
+    } > "$command_path"
+    chmod +x "$command_path"
+    printf '%s\n' "$command_path"
+}
+
 _get_skill_spector_command_path() {
-    local version runtime_dir wrapper
+    local version runtime_dir command_path wrapper
+    command_path=$(_skill_spector_default_command_path)
+    if [ -x "$command_path" ]; then
+        printf '%s\n' "$command_path"
+        return 0
+    fi
     version="${SKILL_SPECTOR_RUNTIME_VERSION:-$(_skill_spector_default_runtime_version)}"
     runtime_dir="${SKILL_SPECTOR_RUNTIME_DIR:-$(_skill_spector_default_runtime_dir "$version")}"
     wrapper=$(_skill_spector_command_path_for_dir "$runtime_dir")
@@ -142,6 +174,7 @@ Options:
   --nacos-home DIR     Accepted for compatibility; not required for command-mode installation.
   --runtime-dir DIR    skill-spector runtime directory.
                        Default: ~/ai-infra/ai-pipeline/skill-spector/<version>
+  Installed command:   ~/ai-infra/ai-pipeline/bin/skill-spector
   -h, --help           Show this help.
 
 Environment variables:
@@ -384,11 +417,15 @@ install_skill_spector_runtime() {
         SKILLSPECTOR_RUNTIME_PLATFORM="${platform_key}" "${wrapper}" --version >/dev/null
     fi
 
+    local command_path
+    command_path=$(_skill_spector_write_command_entry "${wrapper}")
+
     _skill_spector_info "SkillSpector runtime installed:"
     _skill_spector_info "  version: ${version}"
     _skill_spector_info "  platform: ${platform_key}"
     _skill_spector_info "  runtime: ${runtime_root}"
-    _skill_spector_info "  command: ${wrapper}"
+    _skill_spector_info "  wrapper: ${wrapper}"
+    _skill_spector_info "  command: ${command_path}"
 }
 
 _confirm_skill_spector_runtime_install() {
@@ -432,9 +469,14 @@ maybe_install_skill_spector_for_nacos() {
         return 0
     fi
 
-    local runtime_version runtime_dir command_path
+    local runtime_version runtime_dir default_command_path runtime_wrapper command_path
     runtime_version="${SKILL_SPECTOR_RUNTIME_VERSION:-$(_skill_spector_default_runtime_version)}"
     runtime_dir="${SKILL_SPECTOR_RUNTIME_DIR:-$(_skill_spector_default_runtime_dir "$runtime_version")}"
+    default_command_path=$(_skill_spector_default_command_path)
+    runtime_wrapper=$(_skill_spector_command_path_for_dir "$runtime_dir")
+    if [ ! -x "$default_command_path" ] && [ -x "$runtime_wrapper" ]; then
+        _skill_spector_write_command_entry "$runtime_wrapper" >/dev/null
+    fi
 
     command_path=$(_get_skill_spector_command_path || true)
     if [ -n "$command_path" ]; then

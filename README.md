@@ -152,10 +152,16 @@ runtime 会安装到：
 ~/ai-infra/ai-pipeline/skill-spector/<version>
 ```
 
-然后在 Nacos 配置中使用安装后的 wrapper 路径：
+同时会生成稳定命令入口：
+
+```text
+~/ai-infra/ai-pipeline/bin/skill-spector
+```
+
+Nacos 3.3.0+ 默认会探测这个稳定入口。只有安装到其他路径时，才需要在 Nacos 配置中显式指定：
 
 ```properties
-nacos.plugin.ai-pipeline.skill-spector.command=~/ai-infra/ai-pipeline/skill-spector/<version>/bin/skill-spector
+nacos.plugin.ai-pipeline.skill-spector.command=~/ai-infra/ai-pipeline/bin/skill-spector
 ```
 
 离线环境可以使用本地 runtime 包：

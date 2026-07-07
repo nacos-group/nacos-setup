@@ -137,7 +137,8 @@ nacos-setup -db-conf -c prod -n 3
 
 ### 场景四：安装 SkillSpector runtime
 
-Nacos 默认不内置 SkillSpector runtime。启用 `skill-spector` 审核插件前，先安装 runtime：
+Nacos 默认不内置 SkillSpector runtime。`skill-spector` 审核插件需要 Nacos 3.3.0+。
+启用前先安装 runtime：
 
 ```bash
 nacos-setup skill-spector install

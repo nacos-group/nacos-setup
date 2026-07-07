@@ -33,7 +33,7 @@ cat > "$CONFIG_FILE" << 'EOF'
 nacos.plugin.ai-pipeline.type=skill-scanner
 EOF
 
-VERSION=3.2.0 SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" configure_skill_spector_properties "$CONFIG_FILE"
+VERSION=3.3.0 SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" configure_skill_spector_properties "$CONFIG_FILE"
 
 if grep -q "^nacos.plugin.ai-pipeline.enabled=true$" "$CONFIG_FILE" && \
    grep -q "^nacos.plugin.ai-pipeline.type=skill-scanner,skill-spector$" "$CONFIG_FILE" && \
@@ -43,13 +43,19 @@ else
     test_fail "SkillSpector config was not written correctly"
 fi
 
-if VERSION=3.2.0 SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" _skill_spector_should_write_plugin_config; then
+if VERSION=3.3.0 SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" _skill_spector_should_write_plugin_config; then
     test_pass "SkillSpector config gate allows installed runtime"
 else
     test_fail "SkillSpector config gate should allow installed runtime"
 fi
 
-if NACOS_SETUP_SKIP_SKILL_SPECTOR=1 VERSION=3.2.0 SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" _skill_spector_should_write_plugin_config; then
+if VERSION=3.2.0 SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" _skill_spector_should_write_plugin_config; then
+    test_fail "SkillSpector config gate should reject Nacos 3.2.x"
+else
+    test_pass "SkillSpector config gate rejects Nacos 3.2.x"
+fi
+
+if NACOS_SETUP_SKIP_SKILL_SPECTOR=1 VERSION=3.3.0 SKILL_SPECTOR_RUNTIME_DIR="$RUNTIME_DIR" _skill_spector_should_write_plugin_config; then
     test_fail "SkillSpector config gate should honor skip env"
 else
     test_pass "SkillSpector config gate honors skip env"

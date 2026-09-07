@@ -159,7 +159,7 @@ configure_skill_scanner_properties() {
     print_detail "Configuring skill-scanner plugin properties in ${config_file}"
 
     update_config_property "$config_file" "nacos.plugin.ai-pipeline.enabled" "true"
-    update_config_property "$config_file" "nacos.plugin.ai-pipeline.type" "skill-scanner"
+    append_config_csv_property_value "$config_file" "nacos.plugin.ai-pipeline.type" "skill-scanner"
     update_config_property "$config_file" "nacos.plugin.ai-pipeline.skill-scanner.enabled" "true"
 
     local scanner_cmd

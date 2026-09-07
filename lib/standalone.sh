@@ -32,6 +32,10 @@ if [ -f "$SCRIPT_DIR/skill_scanner_install.sh" ]; then
     # shellcheck source=skill_scanner_install.sh
     source "$SCRIPT_DIR/skill_scanner_install.sh"
 fi
+if [ -f "$SCRIPT_DIR/skill_spector_runtime_install.sh" ]; then
+    # shellcheck source=skill_spector_runtime_install.sh
+    source "$SCRIPT_DIR/skill_spector_runtime_install.sh"
+fi
 
 # ============================================================================
 # Global Variables for Standalone Mode
@@ -202,12 +206,12 @@ run_standalone_mode() {
     step_simple_clear
     print_step 5 $TOTAL_STEPS "Importing default data"
     
-    # [6/7] Skill scanner — no spinner (it masks read -p on some terminals); show a static step line.
+    # [6/7] Scan plugins — no spinner (it masks read -p on some terminals); show a static step line.
     step_simple_clear
     if [ "${VERBOSE:-false}" != true ]; then
-        echo -e "${GREEN}[6/7]${NC} Setting up skill-scanner"
+        echo -e "${GREEN}[6/7]${NC} Setting up scan plugins"
     fi
-    print_detail "Post-config: optional Cisco skill-scanner step (Nacos ${VERSION})..."
+    print_detail "Post-config: optional scan plugin step (Nacos ${VERSION})..."
     if declare -F run_post_nacos_config_skill_scanner_hook >/dev/null 2>&1; then
         run_post_nacos_config_skill_scanner_hook
         if declare -F configure_skill_scanner_properties >/dev/null 2>&1 && declare -F _skill_scanner_should_write_plugin_config >/dev/null 2>&1; then
@@ -215,9 +219,14 @@ run_standalone_mode() {
                 configure_skill_scanner_properties "$config_file"
             fi
         fi
+        if declare -F configure_skill_spector_properties >/dev/null 2>&1 && declare -F _skill_spector_should_write_plugin_config >/dev/null 2>&1; then
+            if _skill_spector_should_write_plugin_config; then
+                configure_skill_spector_properties "$config_file"
+            fi
+        fi
     fi
     step_simple_clear
-    print_step 6 $TOTAL_STEPS "Setting up skill-scanner"
+    print_step 6 $TOTAL_STEPS "Setting up scan plugins"
     
     # [7/7] Start Nacos
     if [ "$AUTO_START" = true ]; then

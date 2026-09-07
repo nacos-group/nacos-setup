@@ -70,20 +70,20 @@ function Get-LogTimestamp {
     return Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 }
 
-function Write-Info($msg) { 
-    Write-Host "[INFO] $msg" -ForegroundColor $Global:ColorInfo 
+function Write-Info($msg) {
+    Write-Host "[INFO] $msg" -ForegroundColor $Global:ColorInfo
 }
 
-function Write-Warn($msg) { 
-    Write-Host "[WARN] $msg" -ForegroundColor $Global:ColorWarn 
+function Write-Warn($msg) {
+    Write-Host "[WARN] $msg" -ForegroundColor $Global:ColorWarn
 }
 
-function Write-ErrorMsg($msg) { 
-    Write-Host "[ERROR] $msg" -ForegroundColor $Global:ColorError 
+function Write-ErrorMsg($msg) {
+    Write-Host "[ERROR] $msg" -ForegroundColor $Global:ColorError
 }
 
-function Write-Success($msg) { 
-    Write-Host "[SUCCESS] $msg" -ForegroundColor $Global:ColorSuccess 
+function Write-Success($msg) {
+    Write-Host "[SUCCESS] $msg" -ForegroundColor $Global:ColorSuccess
 }
 
 function Ensure-Directory($path) {
@@ -163,7 +163,7 @@ function Remove-DirectoryRobust {
 function Version-Ge($v1, $v2) {
     if ([string]::IsNullOrWhiteSpace($v1)) { $v1 = "0.0.0" }
     if ([string]::IsNullOrWhiteSpace($v2)) { $v2 = "0.0.0" }
-    
+
     # Extract numeric parts (handle versions like "3.2.0-BETA")
     function Get-NumericParts($ver) {
         $clean = $ver -replace '[^0-9.].*$', ''  # Remove suffixes like -BETA, -ALPHA, etc.
@@ -172,7 +172,7 @@ function Version-Ge($v1, $v2) {
         }
         return $parts
     }
-    
+
     $a = Get-NumericParts $v1
     $b = Get-NumericParts $v2
     for ($i=0; $i -lt 3; $i++) {
@@ -232,4 +232,33 @@ function Update-ConfigProperty($configFile, $key, $value) {
         $lines += ('{0}={1}{2}' -f $key, $value, $nl)
     }
     Set-Content -Path $configFile -Value $lines -Encoding UTF8
+}
+
+function Get-ConfigProperty($configFile, $key) {
+    if ([string]::IsNullOrWhiteSpace($configFile)) { return $null }
+    if (-not (Test-Path $configFile)) { return $null }
+
+    $pattern = "^\s*" + [Regex]::Escape($key) + "\s*=(.*)$"
+    foreach ($line in Get-Content -Path $configFile -Encoding UTF8) {
+        if ($line -match "^\s*#") { continue }
+        if ($line -match $pattern) {
+            return $Matches[1]
+        }
+    }
+    return $null
+}
+
+function Add-ConfigCsvPropertyValue($configFile, $key, $value) {
+    $existing = Get-ConfigProperty $configFile $key
+    if ([string]::IsNullOrWhiteSpace($existing)) {
+        Update-ConfigProperty $configFile $key $value
+        return
+    }
+
+    $items = $existing -split "," | ForEach-Object { $_.Trim() }
+    if ($items -contains $value) {
+        return
+    }
+
+    Update-ConfigProperty $configFile $key "$existing,$value"
 }

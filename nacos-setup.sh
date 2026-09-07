@@ -178,6 +178,9 @@ COMMON OPTIONS:
     -x, --verbose                  Verbose output (show all detailed logs)
     -h, --help                     Show this help message
 
+UTILITY COMMANDS:
+    skill-spector install          Install SkillSpector runtime for command-mode scanning
+
 STANDALONE MODE OPTIONS:
     -d, --dir DIRECTORY            Installation directory
                                    (default: ~/ai-infra/nacos/standalone/nacos-VERSION)
@@ -225,6 +228,10 @@ EXAMPLES:
   Configuration:
     # Configure global database settings
     bash nacos-setup.sh --datasource-conf
+
+  SkillSpector:
+    # Install SkillSpector runtime into the default tools directory
+    bash nacos-setup.sh skill-spector install
 
 VERSION REQUIREMENTS:
     - Minimum supported: Nacos 2.4.0
@@ -441,15 +448,19 @@ validate_arguments() {
 }
 
 # ============================================================================
-# Skill-scanner post-install hook (lib/skill_scanner_install.sh)
+# Scan plugin post-install hook (lib/skill_scanner_install.sh, lib/skill_spector_runtime_install.sh)
 # Called from standalone/cluster after Nacos config is written. Pre-load here so
 # post_nacos_config_hook exists even if a partial/older lib omits the call path.
 # ============================================================================
 
-setup_skill_scanner_hook_for_nacos_install() {
+setup_scan_plugin_hooks_for_nacos_install() {
     if [ -f "$LIB_DIR/skill_scanner_install.sh" ]; then
         # shellcheck source=lib/skill_scanner_install.sh
         source "$LIB_DIR/skill_scanner_install.sh"
+    fi
+    if [ -f "$LIB_DIR/skill_spector_runtime_install.sh" ]; then
+        # shellcheck source=lib/skill_spector_runtime_install.sh
+        source "$LIB_DIR/skill_spector_runtime_install.sh"
     fi
     post_nacos_config_hook() {
         if declare -F maybe_install_skill_scanner_for_nacos >/dev/null 2>&1; then
@@ -457,7 +468,46 @@ setup_skill_scanner_hook_for_nacos_install() {
         else
             echo "[nacos-setup/skill-scanner] skipped: missing $LIB_DIR/skill_scanner_install.sh (reinstall or copy from nacos-setup source tree)" >&2
         fi
+        if declare -F maybe_install_skill_spector_for_nacos >/dev/null 2>&1; then
+            maybe_install_skill_spector_for_nacos "$VERSION"
+        fi
     }
+}
+
+setup_skill_scanner_hook_for_nacos_install() {
+    setup_scan_plugin_hooks_for_nacos_install
+}
+
+run_skill_spector_command() {
+    shift
+    case "${1:-}" in
+        install)
+            shift
+            if [ ! -f "$LIB_DIR/skill_spector_runtime_install.sh" ]; then
+                print_error "SkillSpector runtime installer not found: $LIB_DIR/skill_spector_runtime_install.sh"
+                exit 1
+            fi
+            # shellcheck source=lib/skill_spector_runtime_install.sh
+            source "$LIB_DIR/skill_spector_runtime_install.sh"
+            install_skill_spector_runtime "$@"
+            exit $?
+            ;;
+        -h|--help|"")
+            if [ -f "$LIB_DIR/skill_spector_runtime_install.sh" ]; then
+                # shellcheck source=lib/skill_spector_runtime_install.sh
+                source "$LIB_DIR/skill_spector_runtime_install.sh"
+                print_skill_spector_install_usage
+            else
+                print_usage
+            fi
+            exit 0
+            ;;
+        *)
+            print_error "Unknown skill-spector subcommand: $1"
+            print_info "Usage: bash nacos-setup.sh skill-spector install [options]"
+            exit 1
+            ;;
+    esac
 }
 
 # ============================================================================
@@ -484,6 +534,10 @@ print_nacos_installer_resolution_log() {
 # ============================================================================
 
 main() {
+    if [ "${1:-}" = "skill-spector" ]; then
+        run_skill_spector_command "$@"
+    fi
+
     # Parse command line arguments first
     parse_arguments "$@"
     export VERBOSE
@@ -555,7 +609,7 @@ main() {
     # Disable set -e for mode execution (they handle errors internally)
     set +e
 
-    setup_skill_scanner_hook_for_nacos_install
+    setup_scan_plugin_hooks_for_nacos_install
     
     # Route to appropriate mode
     case "$MODE" in

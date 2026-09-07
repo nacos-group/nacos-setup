@@ -183,16 +183,16 @@ version_ge() {
     # Strip non-numeric suffixes like -BETA so prerelease versions remain comparable.
     clean_v1=$(echo "$v1" | sed 's/[^0-9.].*$//')
     clean_v2=$(echo "$v2" | sed 's/[^0-9.].*$//')
-    
+
     # Split versions into arrays
     IFS='.' read -ra V1 <<< "${clean_v1:-0}"
     IFS='.' read -ra V2 <<< "${clean_v2:-0}"
-    
+
     # Compare each component
     for i in 0 1 2; do
         local num1=${V1[$i]:-0}
         local num2=${V2[$i]:-0}
-        
+
         if [ "$num1" -gt "$num2" ]; then
             return 0  # v1 > v2
         elif [ "$num1" -lt "$num2" ]; then
@@ -200,7 +200,7 @@ version_ge() {
         fi
         # If equal, continue to next component
     done
-    
+
     return 0  # v1 == v2
 }
 
@@ -228,7 +228,7 @@ generate_password() {
 
 detect_os_arch() {
     local os_type="unknown"
-    
+
     case "$(uname -s)" in
         Linux*)
             os_type="linux"
@@ -237,7 +237,7 @@ detect_os_arch() {
             os_type="macos"
             ;;
     esac
-    
+
     echo "$os_type"
 }
 
@@ -249,7 +249,7 @@ detect_os_arch() {
 get_local_ip() {
     local ip=""
     local os_type=$(detect_os_arch)
-    
+
     case "$os_type" in
         macos)
             # Try ipconfig first (macOS native), then fallback to ifconfig
@@ -271,13 +271,13 @@ get_local_ip() {
             fi
             ;;
     esac
-    
+
     # Fallback to 127.0.0.1 if no IP found
     if [ -z "$ip" ]; then
         ip="127.0.0.1"
         print_warn "Could not detect non-localhost IP, using 127.0.0.1" >&2
     fi
-    
+
     echo "$ip"
 }
 
@@ -304,7 +304,7 @@ is_macos_java_stub() {
 # Get Java version from java command
 get_java_version() {
     local java_cmd=$1
-    
+
     # Check if it's macOS stub first
     local java_path
     if [[ "$java_cmd" = /* ]]; then
@@ -312,12 +312,12 @@ get_java_version() {
     else
         java_path=$(command -v "$java_cmd" 2>/dev/null || echo "")
     fi
-    
+
     if [ -n "$java_path" ] && is_macos_java_stub "$java_path"; then
         echo "0"
         return
     fi
-    
+
     # Use timeout to prevent hanging on macOS stub (5 seconds should be enough)
     local version
     if command -v timeout >/dev/null 2>&1; then
@@ -327,7 +327,7 @@ get_java_version() {
     else
         version=$($java_cmd -version 2>&1 | head -1 | sed -n 's/.*version "\([0-9]*\).*/\1/p')
     fi
-    
+
     # Handle Java version format like "1.8.0" -> extract "8"
     if [ -z "$version" ]; then
         if command -v timeout >/dev/null 2>&1; then
@@ -338,7 +338,7 @@ get_java_version() {
             version=$($java_cmd -version 2>&1 | head -1 | sed -n 's/.*version "1\.\([0-9]*\).*/\1/p')
         fi
     fi
-    
+
     echo "${version:-0}"
 }
 
@@ -346,7 +346,7 @@ get_java_version() {
 get_java_search_paths() {
     local os_type=$1
     local paths=()
-    
+
     case "$os_type" in
         linux)
             paths=(
@@ -383,7 +383,7 @@ get_java_search_paths() {
             )
             ;;
     esac
-    
+
     printf '%s\n' "${paths[@]}"
 }
 
@@ -396,11 +396,11 @@ get_java_search_paths() {
 # Returns: 0 on success, 1 on failure
 backup_config_file() {
     local config_file=$1
-    
+
     if [ ! -f "$config_file" ]; then
         return 0  # Nothing to backup
     fi
-    
+
     local backup_file="${config_file}.backup.$(date +%Y%m%d_%H%M%S)"
     if cp "$config_file" "$backup_file" 2>/dev/null; then
         print_detail "Config backed up to: $backup_file" >&2
@@ -416,12 +416,12 @@ update_config_property() {
     local config_file=$1
     local property_key=$2
     local property_value=$3
-    
+
     if [ ! -f "$config_file" ]; then
         echo "[ERROR] Config file does not exist: $config_file" >&2
         return 1
     fi
-    
+
     if grep -q "^${property_key}=" "$config_file" 2>/dev/null; then
         sed -i.bak "s|^${property_key}=.*|${property_key}=${property_value}|" "$config_file"
     elif grep -q "^#${property_key}=" "$config_file" 2>/dev/null; then
@@ -435,42 +435,98 @@ update_config_property() {
     fi
 }
 
+get_config_property() {
+    local config_file=$1
+    local property_key=$2
+
+    if [ ! -f "$config_file" ]; then
+        return 1
+    fi
+
+    awk -v key="$property_key" '
+        /^[[:space:]]*#/ { next }
+        {
+            pos = index($0, "=")
+            if (pos == 0) {
+                next
+            }
+            item_key = substr($0, 1, pos - 1)
+            gsub(/^[ \t]+|[ \t]+$/, "", item_key)
+            if (item_key == key) {
+                value = substr($0, pos + 1)
+            }
+        }
+        END {
+            if (value != "") {
+                print value
+            }
+        }
+    ' "$config_file"
+}
+
+append_config_csv_property_value() {
+    local config_file=$1
+    local property_key=$2
+    local property_value=$3
+    local existing item trimmed next_value
+
+    existing=$(get_config_property "$config_file" "$property_key" 2>/dev/null || true)
+    if [ -z "$existing" ]; then
+        update_config_property "$config_file" "$property_key" "$property_value"
+        return $?
+    fi
+
+    local old_ifs="$IFS"
+    IFS=','
+    for item in $existing; do
+        trimmed=$(printf '%s' "$item" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        if [ "$trimmed" = "$property_value" ]; then
+            IFS="$old_ifs"
+            return 0
+        fi
+    done
+    IFS="$old_ifs"
+
+    next_value="${existing},${property_value}"
+    update_config_property "$config_file" "$property_key" "$next_value"
+}
+
 # ============================================================================
 # System Commands Check
 # ============================================================================
 
 check_system_commands() {
     print_detail "Checking required system commands..."
-    
+
     local missing_commands=()
     local optional_missing=()
-    
+
     # Essential commands
     local required_commands=("curl" "unzip" "grep" "sed")
-    
+
     # Optional commands
     local optional_commands=("lsof" "ps" "kill")
-    
+
     # Check required commands
     for cmd in "${required_commands[@]}"; do
         if ! command -v $cmd &> /dev/null; then
             missing_commands+=("$cmd")
         fi
     done
-    
+
     # Check optional commands
     for cmd in "${optional_commands[@]}"; do
         if ! command -v $cmd &> /dev/null; then
             optional_missing+=("$cmd")
         fi
     done
-    
+
     # Report missing required commands
     if [ ${#missing_commands[@]} -gt 0 ]; then
         print_error "Missing required commands: ${missing_commands[*]}"
         echo ""
         print_info "Please install them first"
-        
+
         local os_type=$(detect_os_arch)
         case "$os_type" in
             linux)
@@ -481,18 +537,18 @@ check_system_commands() {
                 print_info "macOS: brew install ${missing_commands[*]}"
                 ;;
         esac
-        
+
         echo ""
         return 1
     fi
-    
+
     # Optional tools (lsof, etc.): only mention in verbose / advanced UX to keep simple install quiet.
     if [ ${#optional_missing[@]} -gt 0 ] && [ "${VERBOSE:-false}" = true ]; then
         print_warn "Optional commands not found: ${optional_missing[*]}"
         print_info "Some features may be limited (port detection, process management)"
         echo ""
     fi
-    
+
     print_detail "All required commands are available"
     return 0
 }

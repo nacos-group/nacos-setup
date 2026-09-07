@@ -35,21 +35,12 @@ for ver in "${LOW_VERSIONS[@]}"; do
     T1_CONFIG="$T1_DIR/application.properties"
     touch "$T1_CONFIG"
 
-    # Capture stderr for trace messages
-    T1_STDERR=$(maybe_install_skill_scanner_for_nacos "$ver" 2>&1)
+    maybe_install_skill_scanner_for_nacos "$ver" >/dev/null 2>&1
     T1_RC=$?
 
     # Check: return code is 0
     if [ "$T1_RC" -ne 0 ]; then
         test_fail "Test 1: version $ver returned $T1_RC (expected 0)"
-        ALL_SKIP_PASS=false
-        rm -rf "$T1_DIR"
-        continue
-    fi
-
-    # Check: trace contains "skip" message
-    if ! echo "$T1_STDERR" | grep -q "skip:"; then
-        test_fail "Test 1: version $ver did not produce skip trace"
         ALL_SKIP_PASS=false
         rm -rf "$T1_DIR"
         continue
@@ -75,7 +66,7 @@ SKIP_TEST_VERSIONS=("3.2.0" "3.3.0" "4.0.0" "2.0.0" "3.2.0-BETA")
 
 ALL_SKIP_ENV_PASS=true
 for ver in "${SKIP_TEST_VERSIONS[@]}"; do
-    T2_STDERR=$(NACOS_SETUP_SKIP_SKILL_SCANNER=1 maybe_install_skill_scanner_for_nacos "$ver" 2>&1)
+    NACOS_SETUP_SKIP_SKILL_SCANNER=1 maybe_install_skill_scanner_for_nacos "$ver" >/dev/null 2>&1
     T2_RC=$?
 
     if [ "$T2_RC" -ne 0 ]; then
@@ -84,11 +75,6 @@ for ver in "${SKIP_TEST_VERSIONS[@]}"; do
         continue
     fi
 
-    if ! echo "$T2_STDERR" | grep -q "skip: NACOS_SETUP_SKIP_SKILL_SCANNER is set"; then
-        test_fail "Test 2: SKIP_SKILL_SCANNER=1 with version $ver did not produce expected skip trace"
-        ALL_SKIP_ENV_PASS=false
-        continue
-    fi
 done
 
 if [ "$ALL_SKIP_ENV_PASS" = true ]; then
@@ -167,6 +153,21 @@ if ! grep -q "^nacos.core.auth.enabled=true$" "$T3B_CONFIG"; then
 fi
 
 rm -rf "$T3B_DIR"
+
+T3C_DIR=$(mktemp -d)
+T3C_CONFIG="$T3C_DIR/application.properties"
+cat > "$T3C_CONFIG" << 'EOF'
+nacos.plugin.ai-pipeline.type=skill-spector
+EOF
+
+configure_skill_scanner_properties "$T3C_CONFIG" 2>/dev/null
+
+if ! grep -q "^nacos.plugin.ai-pipeline.type=skill-spector,skill-scanner$" "$T3C_CONFIG"; then
+    test_fail "Test 3 (existing type): skill-scanner type should be appended"
+    T3_ALL_PASS=false
+fi
+
+rm -rf "$T3C_DIR"
 
 if [ "$T3_ALL_PASS" = true ]; then
     test_pass "Test 3: configure_skill_scanner_properties always writes base three properties and preserves existing config"

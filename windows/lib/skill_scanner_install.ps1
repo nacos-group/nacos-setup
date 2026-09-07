@@ -367,7 +367,7 @@ function Set-SkillScannerProperties($configFile) {
     }
     Write-Detail "Configuring skill-scanner plugin properties in $configFile"
     Update-ConfigProperty $configFile "nacos.plugin.ai-pipeline.enabled" "true"
-    Update-ConfigProperty $configFile "nacos.plugin.ai-pipeline.type" "skill-scanner"
+    Add-ConfigCsvPropertyValue $configFile "nacos.plugin.ai-pipeline.type" "skill-scanner"
     Update-ConfigProperty $configFile "nacos.plugin.ai-pipeline.skill-scanner.enabled" "true"
 
     $scannerCmd = Get-SkillScannerCommandPath

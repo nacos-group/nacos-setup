@@ -20,18 +20,20 @@
 # Usage: source lib/versions.sh
 #        get_version <component> [timeout_seconds]
 #
-# Components: cli, setup, server
+# Components: cli, setup, server, skill-spector-runtime
 #
 # Examples:
 #   get_version cli          # Get nacos-cli version
 #   get_version setup        # Get nacos-setup version
 #   get_version server       # Get nacos-server version
+#   get_version skill-spector-runtime
 #   get_version cli 2        # Get version with 2 second timeout
 #
 # Environment variables override remote versions:
 #   NACOS_CLI_VERSION
 #   NACOS_SETUP_VERSION
 #   NACOS_SERVER_VERSION
+#   SKILL_SPECTOR_RUNTIME_VERSION
 #
 # ============================================================================
 
@@ -46,6 +48,7 @@ VERSIONS_URL="${DOWNLOAD_BASE_URL}/versions"
 FALLBACK_NACOS_CLI_VERSION="0.0.8"
 FALLBACK_NACOS_SETUP_VERSION="0.0.3"
 FALLBACK_NACOS_SERVER_VERSION="3.2.0-BETA"
+FALLBACK_SKILL_SPECTOR_RUNTIME_VERSION="2.3.11"
 
 # ============================================================================
 # Cached versions (populated on first fetch)
@@ -54,6 +57,7 @@ FALLBACK_NACOS_SERVER_VERSION="3.2.0-BETA"
 _CACHED_CLI_VERSION=""
 _CACHED_SETUP_VERSION=""
 _CACHED_SERVER_VERSION=""
+_CACHED_SKILL_SPECTOR_RUNTIME_VERSION=""
 _VERSIONS_FETCHED=false
 
 # ============================================================================
@@ -113,6 +117,7 @@ _fetch_versions() {
     local cli_ver=$(grep "^NACOS_CLI_VERSION=" "$versions_file" | cut -d'=' -f2 | tr -d '[:space:]')
     local setup_ver=$(grep "^NACOS_SETUP_VERSION=" "$versions_file" | cut -d'=' -f2 | tr -d '[:space:]')
     local server_ver=$(grep "^NACOS_SERVER_VERSION=" "$versions_file" | cut -d'=' -f2 | tr -d '[:space:]')
+    local skill_spector_runtime_ver=$(grep "^SKILL_SPECTOR_RUNTIME_VERSION=" "$versions_file" | cut -d'=' -f2 | tr -d '[:space:]')
 
     rm -rf "$temp_dir"
 
@@ -125,6 +130,9 @@ _fetch_versions() {
     fi
     if [ -n "$server_ver" ]; then
         _CACHED_SERVER_VERSION="$server_ver"
+    fi
+    if [ -n "$skill_spector_runtime_ver" ]; then
+        _CACHED_SKILL_SPECTOR_RUNTIME_VERSION="$skill_spector_runtime_ver"
     fi
 
     _VERSIONS_FETCHED=true
@@ -164,8 +172,13 @@ get_version() {
             fallback_version="$FALLBACK_NACOS_SERVER_VERSION"
             cached_var="_CACHED_SERVER_VERSION"
             ;;
+        skill-spector-runtime|skill-spector)
+            env_var_name="SKILL_SPECTOR_RUNTIME_VERSION"
+            fallback_version="$FALLBACK_SKILL_SPECTOR_RUNTIME_VERSION"
+            cached_var="_CACHED_SKILL_SPECTOR_RUNTIME_VERSION"
+            ;;
         *)
-            echo "Error: Unknown component '$component'. Use: cli, setup, or server." >&2
+            echo "Error: Unknown component '$component'. Use: cli, setup, server, or skill-spector-runtime." >&2
             return 1
             ;;
     esac
@@ -203,7 +216,7 @@ get_version() {
 
 # Get all versions at once (useful for installer)
 # Parameters: timeout_seconds (optional, default: 1)
-# Sets global variables: NACOS_CLI_VERSION, NACOS_SETUP_VERSION, NACOS_SERVER_VERSION
+# Sets global variables: NACOS_CLI_VERSION, NACOS_SETUP_VERSION, NACOS_SERVER_VERSION, SKILL_SPECTOR_RUNTIME_VERSION
 get_all_versions() {
     local timeout="${1:-1}"
 
@@ -216,6 +229,7 @@ get_all_versions() {
     NACOS_CLI_VERSION="${_CACHED_CLI_VERSION:-$FALLBACK_NACOS_CLI_VERSION}"
     NACOS_SETUP_VERSION="${_CACHED_SETUP_VERSION:-$FALLBACK_NACOS_SETUP_VERSION}"
     NACOS_SERVER_VERSION="${_CACHED_SERVER_VERSION:-$FALLBACK_NACOS_SERVER_VERSION}"
+    SKILL_SPECTOR_RUNTIME_VERSION="${_CACHED_SKILL_SPECTOR_RUNTIME_VERSION:-$FALLBACK_SKILL_SPECTOR_RUNTIME_VERSION}"
 }
 
 # Print all versions (for debugging)
@@ -224,4 +238,5 @@ print_versions() {
     echo "  CLI:    $(get_version cli) (fallback: $FALLBACK_NACOS_CLI_VERSION)"
     echo "  Setup:  $(get_version setup) (fallback: $FALLBACK_NACOS_SETUP_VERSION)"
     echo "  Server: $(get_version server) (fallback: $FALLBACK_NACOS_SERVER_VERSION)"
+    echo "  SkillSpector Runtime: $(get_version skill-spector-runtime) (fallback: $FALLBACK_SKILL_SPECTOR_RUNTIME_VERSION)"
 }
